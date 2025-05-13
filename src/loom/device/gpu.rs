@@ -131,7 +131,7 @@ impl GpuBuilder {
         }
     }
 
-    pub async fn build(&mut self) -> Result<Gpu, GpuBuildError> {
+    pub async fn build(&self) -> Result<Gpu, GpuBuildError> {
         let Self {
             adapter,
             features,
