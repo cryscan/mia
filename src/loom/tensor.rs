@@ -1,5 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
+use casey::snake;
 use derive_more::{Deref, DerefMut, Display, From, Into};
 use itertools::Itertools;
 
@@ -54,32 +55,33 @@ impl From<std::ops::RangeFull> for Axis {
 pub struct Slice(pub Vec<Axis>);
 
 macro_rules! impl_slice_from {
-    ($t:ident, $v:ident) => {
+    ($t:ident) => {
         impl<$t: Into<Axis>> From<$t> for Slice {
-            fn from($v: $t) -> Self {
-                Self(vec![$v.into()])
+            fn from(snake!($t): $t) -> Self {
+                Self(vec![snake!($t).into()])
             }
         }
     };
-    (($($t:ident),+), ($($v:ident),+)) => {
+    ($($t:ident),+) => {
         impl<$($t),+> From<($($t),+)> for Slice
         where
             $($t: Into<Axis>),+
         {
-            fn from(($($v),+): ($($t),+)) -> Self {
-                Self(vec![$($v.into()),+])
+            fn from(($(snake!($t)),+): ($($t),+)) -> Self {
+                Self(vec![$(snake!($t).into()),+])
             }
         }
     };
 }
 
-impl_slice_from!(T0, t0);
-impl_slice_from!((T0, T1), (t0, t1));
-impl_slice_from!((T0, T1, T2), (t0, t1, t2));
-impl_slice_from!((T0, T1, T2, T3), (t0, t1, t2, t3));
-impl_slice_from!((T0, T1, T2, T3, T4), (t0, t1, t2, t3, t4));
-impl_slice_from!((T0, T1, T2, T3, T4, T5), (t0, t1, t2, t3, t4, t5));
-impl_slice_from!((T0, T1, T2, T3, T4, T5, T6), (t0, t1, t2, t3, t4, t5, t6));
+impl_slice_from!(T0);
+impl_slice_from!(T0, T1);
+impl_slice_from!(T0, T1, T2);
+impl_slice_from!(T0, T1, T2, T3);
+impl_slice_from!(T0, T1, T2, T3, T4);
+impl_slice_from!(T0, T1, T2, T3, T4, T5);
+impl_slice_from!(T0, T1, T2, T3, T4, T5, T6);
+impl_slice_from!(T0, T1, T2, T3, T4, T5, T6, T7);
 
 #[cfg(test)]
 mod tests {

@@ -140,6 +140,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "casey"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e779867f62d81627d1438e0d3fb6ed7d7c9d64293ca6d87a1e88781b94ece1c"
+dependencies = [
+ "syn",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -713,6 +722,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytemuck",
+ "casey",
  "derive_more",
  "flume",
  "futures",
