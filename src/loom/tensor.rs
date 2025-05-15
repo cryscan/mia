@@ -52,19 +52,15 @@ impl<T: Scalar> Tensor<Gpu, T> {
         .union(wgpu::BufferUsages::COPY_SRC);
 }
 
-pub trait TensorInit<D: Device, T: Scalar> {
+pub trait TensorInit<D: Device, T: Scalar>: Sized {
     /// Init a tensor of zeros.
-    fn zeros(device: D, layout: Layout) -> impl Future<Tensor<D, T>>;
+    fn zeros(device: D, layout: Layout) -> impl Future<Self>;
     /// Create a tensor from data.
-    fn create(
-        device: D,
-        layout: Layout,
-        data: &[T],
-    ) -> impl Future<Result<Tensor<D, T>, TensorError>>;
+    fn create(device: D, layout: Layout, data: &[T]) -> impl Future<Result<Self, TensorError>>;
 }
 
 impl<T: Scalar> TensorInit<Cpu, T> for Tensor<Cpu, T> {
-    async fn zeros(device: Cpu, layout: Layout) -> Tensor<Cpu, T> {
+    async fn zeros(device: Cpu, layout: Layout) -> Self {
         let data = device.alloc::<T>(layout.size(), ()).await;
         let slice = Slice(vec![Axis::Full; layout.len()]);
         let id = uid::Id::new();
@@ -79,11 +75,7 @@ impl<T: Scalar> TensorInit<Cpu, T> for Tensor<Cpu, T> {
         }
     }
 
-    async fn create(
-        device: Cpu,
-        layout: Layout,
-        data: &[T],
-    ) -> Result<Tensor<Cpu, T>, TensorError> {
+    async fn create(device: Cpu, layout: Layout, data: &[T]) -> Result<Self, TensorError> {
         if layout.size() != data.len() {
             return Err(TensorError::Create(layout, data.len()));
         }
@@ -103,7 +95,7 @@ impl<T: Scalar> TensorInit<Cpu, T> for Tensor<Cpu, T> {
 }
 
 impl<T: Scalar> TensorInit<Gpu, T> for Tensor<Gpu, T> {
-    async fn zeros(device: Gpu, layout: Layout) -> Tensor<Gpu, T> {
+    async fn zeros(device: Gpu, layout: Layout) -> Self {
         let data = device.alloc::<T>(layout.size(), Self::PARAMS).await;
         let slice = Slice(vec![Axis::Full; layout.len()]);
         let id = uid::Id::new();
@@ -118,11 +110,7 @@ impl<T: Scalar> TensorInit<Gpu, T> for Tensor<Gpu, T> {
         }
     }
 
-    async fn create(
-        device: Gpu,
-        layout: Layout,
-        data: &[T],
-    ) -> Result<Tensor<Gpu, T>, TensorError> {
+    async fn create(device: Gpu, layout: Layout, data: &[T]) -> Result<Self, TensorError> {
         if layout.size() != data.len() {
             return Err(TensorError::Create(layout, data.len()));
         }
@@ -144,6 +132,13 @@ impl<T: Scalar> TensorInit<Gpu, T> for Tensor<Gpu, T> {
 pub trait TensorTo<D: Device, T: Scalar> {
     /// Send a tensor to another device.
     fn to(self, device: D) -> impl Future<Tensor<D, T>>;
+}
+
+impl<T: Scalar> TensorTo<Cpu, T> for Tensor<Cpu, T> {
+    #[inline]
+    async fn to(self, _device: Cpu) -> Tensor<Cpu, T> {
+        self
+    }
 }
 
 impl<T: Scalar> TensorTo<Gpu, T> for Tensor<Cpu, T> {
@@ -205,12 +200,14 @@ pub enum Axis {
 }
 
 impl From<usize> for Axis {
+    #[inline]
     fn from(value: usize) -> Self {
         Self::One(value)
     }
 }
 
 impl From<std::ops::RangeFull> for Axis {
+    #[inline]
     fn from(_: std::ops::RangeFull) -> Self {
         Self::Full
     }
@@ -223,6 +220,7 @@ pub struct Slice(pub Vec<Axis>);
 macro_rules! impl_slice_from {
     ($t:ident) => {
         impl<$t: Into<Axis>> From<$t> for Slice {
+            #[inline]
             fn from(snake!($t): $t) -> Self {
                 Self(vec![snake!($t).into()])
             }
@@ -233,6 +231,7 @@ macro_rules! impl_slice_from {
         where
             $($t: Into<Axis>),+
         {
+            #[inline]
             fn from(($(snake!($t)),+): ($($t),+)) -> Self {
                 Self(vec![$(snake!($t).into()),+])
             }
