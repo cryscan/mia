@@ -5,7 +5,7 @@ use thiserror::Error;
 use wgpu::util::DeviceExt;
 
 use super::{Cpu, Device, DeviceId};
-use crate::num::Element;
+use crate::num::Scalar;
 
 /// A WebGPU device.
 #[allow(unused)]
@@ -34,7 +34,7 @@ impl Device for Gpu {
     type Params = wgpu::BufferUsages;
 
     #[inline]
-    async fn alloc<T: Element>(&self, len: usize, params: Self::Params) -> Arc<Self::Data> {
+    async fn alloc<T: Scalar>(&self, len: usize, params: Self::Params) -> Arc<Self::Data> {
         let (sender, receiver) = flume::bounded(1);
         let size = (len * size_of::<T>()) as u64;
         let _ = self.event.send(GpuEvent::Alloc {
@@ -49,7 +49,7 @@ impl Device for Gpu {
     }
 
     #[inline]
-    async fn create<T: Element>(&self, data: &[T], params: Self::Params) -> Arc<Self::Data> {
+    async fn create<T: Scalar>(&self, data: &[T], params: Self::Params) -> Arc<Self::Data> {
         #[cfg(feature = "trace")]
         let _span = tracing::trace_span!("create").entered();
         let data = bytemuck::cast_slice(data);
@@ -68,7 +68,7 @@ impl Device for Gpu {
     }
 
     /// Reads back a buffer with [`STORAGE`](wgpu::BufferUsages::STORAGE) and [`COPY_SRC`](wgpu::BufferUsages::COPY_SRC) usages.
-    async fn read<T: Element>(&self, source: &<Self as Device>::Data) -> Box<[T]> {
+    async fn read<T: Scalar>(&self, source: &<Self as Device>::Data) -> Box<[T]> {
         let len = source.size() as usize / size_of::<T>();
         let size = (len * size_of::<T>()) as u64;
         let params = wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST;

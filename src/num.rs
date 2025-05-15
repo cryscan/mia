@@ -2,7 +2,7 @@ use bytemuck::{Pod, Zeroable};
 use half::f16;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DataType {
     F32,
     F16,
@@ -29,7 +29,7 @@ unsafe impl Zeroable for PackedU8x4 {}
 
 unsafe impl Pod for PackedU8x4 {}
 
-pub trait Zero: Sized + core::ops::Add<Self, Output = Self> {
+pub trait Zero {
     fn zero() -> Self;
 }
 
@@ -63,7 +63,19 @@ impl Zero for u32 {
     }
 }
 
-pub trait One: Sized + core::ops::Mul<Self, Output = Self> {
+impl Zero for PackedU4x8 {
+    fn zero() -> Self {
+        Self(0)
+    }
+}
+
+impl Zero for PackedU8x4 {
+    fn zero() -> Self {
+        Self(0)
+    }
+}
+
+pub trait One {
     fn one() -> Self;
 }
 
@@ -97,47 +109,51 @@ impl One for u32 {
     }
 }
 
-pub trait Element: Sized + Clone + Copy + Pod + Send + Sync + sealed::Sealed {
+impl One for PackedU4x8 {
+    fn one() -> Self {
+        Self(0x11111111)
+    }
+}
+
+impl One for PackedU8x4 {
+    fn one() -> Self {
+        Self(0x01010101)
+    }
+}
+
+pub trait Scalar: Sized + Pod + Zero + One + Send + Sync + sealed::Sealed {
     const DATA_TYPE: DataType;
 }
 
-pub trait Scalar: Element + Zero + One {}
-
 pub trait Float: Scalar {}
 
-impl Element for f32 {
+impl Scalar for f32 {
     const DATA_TYPE: DataType = DataType::F32;
 }
 
-impl Element for f16 {
+impl Scalar for f16 {
     const DATA_TYPE: DataType = DataType::F16;
 }
 
-impl Element for u8 {
+impl Scalar for u8 {
     const DATA_TYPE: DataType = DataType::U8;
 }
 
-impl Element for u16 {
+impl Scalar for u16 {
     const DATA_TYPE: DataType = DataType::U16;
 }
 
-impl Element for u32 {
+impl Scalar for u32 {
     const DATA_TYPE: DataType = DataType::U32;
 }
 
-impl Element for PackedU4x8 {
+impl Scalar for PackedU4x8 {
     const DATA_TYPE: DataType = DataType::PackedU4x8;
 }
 
-impl Element for PackedU8x4 {
+impl Scalar for PackedU8x4 {
     const DATA_TYPE: DataType = DataType::PackedU8x4;
 }
-
-impl Scalar for f32 {}
-impl Scalar for f16 {}
-impl Scalar for u8 {}
-impl Scalar for u16 {}
-impl Scalar for u32 {}
 
 impl Float for f32 {}
 impl Float for f16 {}

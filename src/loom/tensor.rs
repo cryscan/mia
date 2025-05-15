@@ -3,9 +3,22 @@ use std::{marker::PhantomData, sync::Arc};
 use casey::snake;
 use derive_more::{Deref, DerefMut, Display, From, Into};
 use itertools::Itertools;
+use thiserror::Error;
 
-use super::{device::Device, layout::Layout};
-use crate::num::Scalar;
+use super::{
+    device::{Cpu, Device, Gpu},
+    layout::Layout,
+};
+use crate::{future::Future, num::Scalar};
+
+#[derive(Debug, Error)]
+pub enum TensorError {
+    #[error("tensor creation error: size not match, layout {0}'s size not match data len {1}")]
+    Create(Layout, usize),
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TensorId;
 
 #[derive(Debug, Clone)]
 pub struct Tensor<D: Device, T: Scalar> {
@@ -26,8 +39,173 @@ impl<D: Device, T: Scalar> Drop for Tensor<D, T> {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TensorId;
+impl<T: Scalar> Tensor<Cpu, T> {
+    #[inline]
+    pub fn data(&self) -> &[T] {
+        bytemuck::cast_slice(&self.data)
+    }
+}
+
+impl<T: Scalar> Tensor<Gpu, T> {
+    pub const PARAMS: wgpu::BufferUsages = wgpu::BufferUsages::STORAGE
+        .union(wgpu::BufferUsages::COPY_DST)
+        .union(wgpu::BufferUsages::COPY_SRC);
+}
+
+pub trait TensorInit<D: Device, T: Scalar> {
+    /// Init a tensor of zeros.
+    fn zeros(device: D, layout: Layout) -> impl Future<Tensor<D, T>>;
+    /// Init a tensor of ones.
+    fn ones(device: D, layout: Layout) -> impl Future<Tensor<D, T>>;
+    /// Create a tensor from data.
+    fn create(
+        device: D,
+        layout: Layout,
+        data: &[T],
+    ) -> impl Future<Result<Tensor<D, T>, TensorError>>;
+}
+
+impl<T: Scalar> TensorInit<Cpu, T> for Tensor<Cpu, T> {
+    async fn zeros(device: Cpu, layout: Layout) -> Tensor<Cpu, T> {
+        let data = device.alloc::<T>(layout.size(), ()).await;
+        let slice = Slice(vec![Axis::Full; layout.len()]);
+        let id = uid::Id::new();
+        let phantom = PhantomData;
+        Self {
+            device,
+            layout,
+            slice,
+            data,
+            id,
+            phantom,
+        }
+    }
+
+    async fn ones(device: Cpu, layout: Layout) -> Tensor<Cpu, T> {
+        let data = vec![T::one(); layout.len()];
+        Self::create(device, layout, &data).await.unwrap()
+    }
+
+    async fn create(
+        device: Cpu,
+        layout: Layout,
+        data: &[T],
+    ) -> Result<Tensor<Cpu, T>, TensorError> {
+        if layout.size() != data.len() {
+            return Err(TensorError::Create(layout, data.len()));
+        }
+        let data = device.create(data, ()).await;
+        let slice = Slice(vec![Axis::Full; layout.len()]);
+        let id = uid::Id::new();
+        let phantom = PhantomData;
+        Ok(Self {
+            device,
+            layout,
+            slice,
+            data,
+            id,
+            phantom,
+        })
+    }
+}
+
+impl<T: Scalar> TensorInit<Gpu, T> for Tensor<Gpu, T> {
+    async fn zeros(device: Gpu, layout: Layout) -> Tensor<Gpu, T> {
+        let data = device.alloc::<T>(layout.size(), Self::PARAMS).await;
+        let slice = Slice(vec![Axis::Full; layout.len()]);
+        let id = uid::Id::new();
+        let phantom = PhantomData;
+        Self {
+            device,
+            layout,
+            slice,
+            data,
+            id,
+            phantom,
+        }
+    }
+
+    async fn ones(device: Gpu, layout: Layout) -> Tensor<Gpu, T> {
+        let data = vec![T::one(); layout.len()];
+        Self::create(device, layout, &data).await.unwrap()
+    }
+
+    async fn create(
+        device: Gpu,
+        layout: Layout,
+        data: &[T],
+    ) -> Result<Tensor<Gpu, T>, TensorError> {
+        if layout.size() != data.len() {
+            return Err(TensorError::Create(layout, data.len()));
+        }
+        let data = device.create(data, Self::PARAMS).await;
+        let slice = Slice(vec![Axis::Full; layout.len()]);
+        let id = uid::Id::new();
+        let phantom = PhantomData;
+        Ok(Self {
+            device,
+            layout,
+            slice,
+            data,
+            id,
+            phantom,
+        })
+    }
+}
+
+pub trait TensorTo<D: Device, T: Scalar> {
+    /// Send a tensor to another device.
+    fn to(self, device: D) -> impl Future<Tensor<D, T>>;
+}
+
+impl<T: Scalar> TensorTo<Gpu, T> for Tensor<Cpu, T> {
+    #[inline]
+    async fn to(self, device: Gpu) -> Tensor<Gpu, T> {
+        let data = device.create(self.data(), Tensor::<Gpu, T>::PARAMS).await;
+        let layout = self.layout.clone();
+        let slice = self.slice.clone();
+        let id = uid::Id::new();
+        let phantom = PhantomData;
+        Tensor {
+            device,
+            layout,
+            data,
+            slice,
+            id,
+            phantom,
+        }
+    }
+}
+
+impl<T: Scalar> TensorTo<Cpu, T> for Tensor<Gpu, T> {
+    #[inline]
+    async fn to(self, device: Cpu) -> Tensor<Cpu, T> {
+        let data = self.device.read(&self.data).await.into();
+        let layout = self.layout.clone();
+        let slice = self.slice.clone();
+        let id = uid::Id::new();
+        let phantom = PhantomData;
+        Tensor {
+            device,
+            layout,
+            data,
+            slice,
+            id,
+            phantom,
+        }
+    }
+}
+
+impl<T: Scalar> TensorTo<Gpu, T> for Tensor<Gpu, T> {
+    #[inline]
+    async fn to(self, device: Gpu) -> Tensor<Gpu, T> {
+        if self.device == device {
+            return self;
+        }
+        let cpu: Tensor<Cpu, T> = self.to(Cpu::new()).await;
+        cpu.to(device).await
+    }
+}
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Display)]
 pub enum Axis {
