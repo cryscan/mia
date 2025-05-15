@@ -34,6 +34,7 @@ pub trait Compose<F> {
 pub struct Shape(pub Vec<usize>);
 
 impl<const N: usize> From<[usize; N]> for Shape {
+    #[inline]
     fn from(value: [usize; N]) -> Self {
         Self(value.into_iter().collect())
     }
@@ -180,6 +181,7 @@ impl Shape {
 pub struct Stride(pub Vec<usize>);
 
 impl<const N: usize> From<[usize; N]> for Stride {
+    #[inline]
     fn from(value: [usize; N]) -> Self {
         Self(value.into_iter().collect())
     }
@@ -198,6 +200,7 @@ impl Stride {
 pub struct Coord(pub Vec<usize>);
 
 impl<const N: usize> From<[usize; N]> for Coord {
+    #[inline]
     fn from(value: [usize; N]) -> Self {
         Self(value.into_iter().collect())
     }
@@ -224,6 +227,7 @@ where
     S: Into<Shape>,
     D: Into<Stride>,
 {
+    #[inline]
     fn from((s, d): (S, D)) -> Self {
         Self::from_shape_stride(s, d)
     }
@@ -233,12 +237,14 @@ impl<S> From<S> for Layout
 where
     S: Into<Shape>,
 {
+    #[inline]
     fn from(s: S) -> Self {
         Self::from_shape(s)
     }
 }
 
 impl From<(usize, usize)> for Layout {
+    #[inline]
     fn from((s, d): (usize, usize)) -> Self {
         Self::from_shape_stride([s], [d])
     }
@@ -384,14 +390,13 @@ impl Layout {
     }
 
     /// Simplifies a layout to some length.
+    #[inline]
     pub fn coalesce_to(&self, len: usize) -> Self {
         let mut layout = self.0.clone();
-
         loop {
             if layout.len() <= len.max(1) {
                 break Self(layout);
             }
-
             let coalesced = [layout.clone(), vec![(1, 0)]]
                 .concat()
                 .into_iter()
@@ -403,12 +408,10 @@ impl Layout {
                     (x, y) => vec![x, y],
                 })
                 .concat();
-
             if coalesced == layout {
                 break Self(layout);
             }
-
-            let _ = std::mem::replace(&mut layout, coalesced);
+            layout = coalesced;
         }
     }
 
@@ -443,6 +446,7 @@ impl Layout {
     }
 
     /// Complements of the layout to a given size, if being admissible for complement.
+    #[inline]
     pub fn complement(&self, size: usize) -> Result<Self, LayoutError> {
         let layout = self.filter().sort();
         if layout.is_zero() {
@@ -538,6 +542,7 @@ impl IndexFn<&Coord> for Layout {
 impl IndexFn<&mut Coord> for Layout {
     type Output = usize;
 
+    #[inline]
     fn value(&self, index: &mut Coord) -> Self::Output {
         self.value(index as &Coord)
     }
@@ -555,6 +560,7 @@ impl IndexFn<Coord> for Layout {
 impl<const N: usize> IndexFn<[usize; N]> for Layout {
     type Output = usize;
 
+    #[inline]
     fn value(&self, index: [usize; N]) -> Self::Output {
         self.value(Coord::from(index))
     }
@@ -605,6 +611,7 @@ impl Compose<&Layout> for (usize, usize) {
 impl Compose<&mut Layout> for (usize, usize) {
     type Output = Result<Layout, LayoutError>;
 
+    #[inline]
     fn compose(&self, f: &mut Layout) -> Self::Output {
         self.compose(f as &Layout)
     }
@@ -613,6 +620,7 @@ impl Compose<&mut Layout> for (usize, usize) {
 impl Compose<Layout> for (usize, usize) {
     type Output = Result<Layout, LayoutError>;
 
+    #[inline]
     fn compose(&self, f: Layout) -> Self::Output {
         self.compose(&f)
     }
@@ -637,6 +645,7 @@ impl Compose<&Layout> for Layout {
 impl Compose<&mut Layout> for Layout {
     type Output = Result<Layout, LayoutError>;
 
+    #[inline]
     fn compose(&self, f: &mut Layout) -> Self::Output {
         self.compose(f as &Layout)
     }
@@ -653,7 +662,7 @@ impl Compose<Layout> for Layout {
 
 /// A swizzle functor.
 /// See [CuTe documentation](https://github.com/NVIDIA/cutlass/blob/main/include/cute/swizzle.hpp#L44) for more info.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Swizzle {
     pub base: usize,
     pub bits: usize,
@@ -674,6 +683,7 @@ impl IndexFn<usize> for Swizzle {
 impl Compose<Swizzle> for Layout {
     type Output = ComposedFn<Layout, Swizzle>;
 
+    #[inline]
     fn compose(&self, f: Swizzle) -> Self::Output {
         ComposedFn(self.clone(), f)
     }
@@ -682,16 +692,18 @@ impl Compose<Swizzle> for Layout {
 impl Compose<&Swizzle> for Layout {
     type Output = ComposedFn<Layout, Swizzle>;
 
+    #[inline]
     fn compose(&self, f: &Swizzle) -> Self::Output {
-        ComposedFn(self.clone(), f.clone())
+        ComposedFn(self.clone(), *f)
     }
 }
 
 impl Compose<&mut Swizzle> for Layout {
     type Output = ComposedFn<Layout, Swizzle>;
 
+    #[inline]
     fn compose(&self, f: &mut Swizzle) -> Self::Output {
-        ComposedFn(self.clone(), f.clone())
+        ComposedFn(self.clone(), *f)
     }
 }
 
@@ -706,6 +718,7 @@ where
 {
     type Output = K;
 
+    #[inline]
     fn value(&self, index: I) -> Self::Output {
         self.1.value(self.0.value(index))
     }
@@ -1096,10 +1109,10 @@ mod tests {
 
         let layout_u = Layout::from(([x, y], [1, x]));
         let layout_v = Layout::from(([y, x], [1, y]));
-        let layout_v_s = layout_v.compose(&swizzle);
+        let layout_v_s = layout_v.compose(swizzle);
 
         let layout_t = Layout::from(([x, y], [y, 1]));
-        let layout_t_s = layout_t.compose(&swizzle);
+        let layout_t_s = layout_t.compose(swizzle);
 
         for i in 0..src.len() {
             tmp[layout_t_s.value(i)] = src[layout_u.value(i)];
@@ -1152,19 +1165,18 @@ mod tests {
         let layout_sa = Layout::from([bm, bk]);
         let layout_sb = Layout::from([bn, bk]);
 
-        for ((k, j), i) in (0..layout_ta.shape_of(3))
-            .cartesian_product(0..layout_tc.shape_of(3))
-            .cartesian_product(0..layout_tc.shape_of(2))
-        {
-            for (y, x) in (0..bk).cartesian_product(0..bm) {
+        for (k, j, i) in itertools::iproduct!(
+            0..layout_ta.shape_of(3),
+            0..layout_tc.shape_of(3),
+            0..layout_tc.shape_of(2)
+        ) {
+            for (y, x) in itertools::iproduct!(0..bk, 0..bm) {
                 sa[layout_sa.value([x, y])] = a[layout_ta.value([x, y, i, k])];
             }
-
-            for (y, x) in (0..bk).cartesian_product(0..bn) {
+            for (y, x) in itertools::iproduct!(0..bk, 0..bn) {
                 sb[layout_sb.value([x, y])] = b[layout_tb.value([x, y, j, k])];
             }
-
-            for ((z, y), x) in (0..bk).cartesian_product(0..bn).cartesian_product(0..bm) {
+            for (z, y, x) in itertools::iproduct!(0..bk, 0..bn, 0..bm) {
                 let ra = sa[layout_sa.value([x, z])];
                 let rb = sb[layout_sb.value([y, z])];
                 c[layout_tc.value([x, y, i, j])] += ra * rb;
@@ -1174,7 +1186,7 @@ mod tests {
         print_tensor(&c, &layout_c);
 
         let mut xc = vec![0; m * n];
-        for ((z, y), x) in (0..k).cartesian_product(0..n).cartesian_product(0..m) {
+        for (z, y, x) in itertools::iproduct!(0..k, 0..n, 0..m) {
             let ra = a[layout_a.value([x, z])];
             let rb = b[layout_b.value([y, z])];
             xc[layout_c.value([x, y])] += ra * rb;
