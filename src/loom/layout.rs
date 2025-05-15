@@ -1,4 +1,4 @@
-use std::borrow::Borrow;
+use std::sync::Arc;
 
 use derive_more::{Deref, DerefMut, Display, From, Into};
 use itertools::Itertools;
@@ -31,11 +31,11 @@ pub trait Compose<F> {
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into, Display)]
 #[display("{_0:?}")]
-pub struct Shape(pub Vec<usize>);
+pub struct Shape(pub Arc<[usize]>);
 
 impl From<usize> for Shape {
     fn from(value: usize) -> Self {
-        Self(vec![value])
+        Self(vec![value].into())
     }
 }
 
@@ -46,10 +46,17 @@ impl<const N: usize> From<[usize; N]> for Shape {
     }
 }
 
+impl From<Vec<usize>> for Shape {
+    #[inline]
+    fn from(value: Vec<usize>) -> Self {
+        Self(value.into())
+    }
+}
+
 impl Shape {
     #[inline]
     pub fn from_slice(slice: &[usize]) -> Self {
-        Self(slice.to_vec())
+        Self(slice.into())
     }
 
     /// Returns `true` if the shape is of size 0.
@@ -63,7 +70,7 @@ impl Shape {
     pub fn size(&self) -> usize {
         match self.len() {
             0 => 0,
-            _ => self.0.iter().product(),
+            _ => self.iter().product(),
         }
     }
 
@@ -84,15 +91,14 @@ impl Shape {
         if d == 0 {
             assert_ne!(self.len(), 0);
             // in this case, since all nature numbers divide 0, we must have `i = α`, and c = 0
-            let mut r = self.clone();
-            r.0[self.len() - 1] = 0;
-            return Ok((Default::default(), r));
+            let mut r = self.to_vec();
+            r[self.len() - 1] = 0;
+            return Ok((Default::default(), Shape::from(r)));
         }
 
         // [`1`, `N0`, `N0 × N1`, ..., `N0 × N1 × ... × N(α - 1)`]
         // [`N0`, `N1`, ..., `N(α)`]
         let product = self
-            .0
             .iter()
             .scan(1, |p, &n| {
                 let q = *p;
@@ -117,7 +123,7 @@ impl Shape {
         };
 
         assert!(i < self.len());
-        let (r, q) = self.0.split_at(i);
+        let (r, q) = self.split_at(i);
 
         assert!(!q.is_empty());
         assert_eq!(q[0], n);
@@ -126,7 +132,7 @@ impl Shape {
         let r = [r, &[c]].concat();
         let q = [&[n / c], &q[1..]].concat();
 
-        Ok((Shape(q), Shape(r)))
+        Ok((Shape::from(q), Shape::from(r)))
     }
 
     /// Performs weak shape division.
@@ -138,15 +144,14 @@ impl Shape {
         if d == 0 {
             assert_ne!(self.len(), 0);
             // in this case, since all nature numbers divide 0, we must have `i = α`, and c = 0
-            let mut r = self.clone();
-            r.0[self.len() - 1] = 0;
-            return Ok(r);
+            let mut r = self.to_vec();
+            r[self.len() - 1] = 0;
+            return Ok(Shape::from(r));
         }
 
         // [`1`, `N0`, `N0 × N1`, ..., `N0 × N1 × ... × N(α - 1)`]
         // [`N0`, `N1`, ..., `N(α)`]
         let product = self
-            .0
             .iter()
             .scan(1, |p, &n| {
                 let q = *p;
@@ -171,24 +176,24 @@ impl Shape {
         };
 
         assert!(i < self.len());
-        let r = &self.0[..i];
+        let r = &self[..i];
 
         let c = d / p;
         let r = [r, &[c]].concat();
         assert_ne!(r.len(), 0);
 
-        Ok(Shape(r))
+        Ok(Shape::from(r))
     }
 }
 
 /// Defines the step to add to when increase 1 along coordinates.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into, Display)]
 #[display("{_0:?}")]
-pub struct Stride(pub Vec<usize>);
+pub struct Stride(pub Arc<[usize]>);
 
 impl From<usize> for Stride {
     fn from(value: usize) -> Self {
-        Self(vec![value])
+        Self(vec![value].into())
     }
 }
 
@@ -199,17 +204,24 @@ impl<const N: usize> From<[usize; N]> for Stride {
     }
 }
 
+impl From<Vec<usize>> for Stride {
+    #[inline]
+    fn from(value: Vec<usize>) -> Self {
+        Self(value.into())
+    }
+}
+
 impl Stride {
     #[inline]
     pub fn from_slice(slice: &[usize]) -> Self {
-        Self(slice.to_vec())
+        Self(slice.into())
     }
 }
 
 /// A multi-dimensional coordinate.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into, Display)]
 #[display("{_0:?}")]
-pub struct Coord(pub Vec<usize>);
+pub struct Coord(pub Arc<[usize]>);
 
 impl<const N: usize> From<[usize; N]> for Coord {
     #[inline]
@@ -218,10 +230,17 @@ impl<const N: usize> From<[usize; N]> for Coord {
     }
 }
 
+impl From<Vec<usize>> for Coord {
+    #[inline]
+    fn from(value: Vec<usize>) -> Self {
+        Self(value.into())
+    }
+}
+
 impl Coord {
     #[inline]
     pub fn from_slice(slice: &[usize]) -> Self {
-        Self(slice.to_vec())
+        Self(slice.into())
     }
 }
 
@@ -232,22 +251,45 @@ impl Coord {
 /// 2. [A note on the algebra of CuTe Layouts](https://leimao.github.io/downloads/article/2024-10-20-CuTe-Layout-Algebra/layout_algebra.pdf).
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into, Display)]
 #[display("<{}, {}>", self.shape(), self.stride())]
-pub struct Layout(pub Vec<(usize, usize)>);
+pub struct Layout(pub Arc<[(usize, usize)]>);
+
+impl From<Vec<(usize, usize)>> for Layout {
+    #[inline]
+    fn from(value: Vec<(usize, usize)>) -> Self {
+        Self(value.into())
+    }
+}
 
 pub trait IntoLayout {
     fn into_layout(self) -> Layout;
 }
 
-impl<S: Into<Shape>, D: Into<Stride>> IntoLayout for (S, D) {
+impl<S, D> IntoLayout for (S, D)
+where
+    S: Into<Shape>,
+    D: Into<Stride>,
+{
+    #[inline]
     fn into_layout(self) -> Layout {
         let (shape, stride) = self;
         Layout::from_shape_stride(shape.into(), stride.into())
     }
 }
 
-impl<S: Into<Shape>> IntoLayout for S {
+impl<S> IntoLayout for S
+where
+    S: Into<Shape>,
+{
+    #[inline]
     fn into_layout(self) -> Layout {
         Layout::from_shape(self.into())
+    }
+}
+
+impl IntoLayout for Vec<(usize, usize)> {
+    #[inline]
+    fn into_layout(self) -> Layout {
+        self.into()
     }
 }
 
@@ -257,7 +299,6 @@ impl Layout {
         let shape: Shape = shape.into();
         let stride = Stride(
             shape
-                .0
                 .iter()
                 .scan(1, |p, x| {
                     let q = *p;
@@ -275,31 +316,31 @@ impl Layout {
     pub fn from_shape_stride(shape: impl Into<Shape>, stride: impl Into<Stride>) -> Self {
         let shape: Shape = shape.into();
         let stride: Stride = stride.into();
-        Self(shape.0.into_iter().zip_eq(stride.0).collect())
+        Self(shape.iter().copied().zip_eq(stride.to_vec()).collect())
     }
 
     /// Retrieves the shape of the layout.
     #[inline]
     pub fn shape(&self) -> Shape {
-        Shape(self.0.iter().map(|&(x, _)| x).collect())
+        Shape(self.iter().map(|&(x, _)| x).collect())
     }
 
     /// Retrieves the stride of the layout.
     #[inline]
     pub fn stride(&self) -> Stride {
-        Stride(self.0.iter().map(|&(_, x)| x).collect())
+        Stride(self.iter().map(|&(_, x)| x).collect())
     }
 
     /// Retrieves the shape of a specific mode in the layout.
     #[inline]
     pub fn shape_of(&self, mode: usize) -> usize {
-        self.0[mode].0
+        self[mode].0
     }
 
     /// Retrieves the stride of a specific mode in the layout.
     #[inline]
     pub fn stride_of(&self, mode: usize) -> usize {
-        self.0[mode].1
+        self[mode].1
     }
 
     /// Returns `true` if the layout is of size 0.
@@ -327,7 +368,7 @@ impl Layout {
     #[inline]
     pub fn full_size(&self) -> usize {
         let layout = self.filter().sort();
-        match layout.0.last() {
+        match layout.last() {
             Some((n, d)) => n * d,
             None => 0,
         }
@@ -336,40 +377,35 @@ impl Layout {
     /// Maps a linear index to a multi-dimensional coordinate.
     #[inline]
     pub fn iota(&self, index: usize) -> Coord {
-        Coord(
-            self.0
-                .iter()
-                .fold((vec![], 1), |(mut v, p), &(m, _)| {
-                    v.push((index / p) % m);
-                    (v, p * m)
-                })
-                .0,
-        )
+        self.iter()
+            .fold((vec![], 1), |(mut v, p), &(m, _)| {
+                v.push((index / p) % m);
+                (v, p * m)
+            })
+            .0
+            .into()
     }
 
     /// Same as [`Layout::iota`], but not limited by the bound of the highest dimension.
     #[inline]
     pub fn iota_extend(&self, index: usize) -> Coord {
-        Coord(
-            self.0
-                .iter()
-                .enumerate()
-                .fold((vec![], 1), |(mut v, p), (x, &(m, _))| {
-                    match x {
-                        x if x + 1 == self.len() => v.push(index / p),
-                        _ => v.push((index / p) % m),
-                    };
-                    (v, p * m)
-                })
-                .0,
-        )
+        self.iter()
+            .enumerate()
+            .fold((vec![], 1), |(mut v, p), (x, &(m, _))| {
+                match x {
+                    x if x + 1 == self.len() => v.push(index / p),
+                    _ => v.push((index / p) % m),
+                };
+                (v, p * m)
+            })
+            .0
+            .into()
     }
 
     /// Returns `true` if two layouts are totally equal as index mappings.
     /// Note that this check is exponentially slow so only use it in tests.
     #[inline]
-    pub fn check_isomorphic(&self, other: impl Borrow<Layout>) -> bool {
-        let other: &Self = other.borrow();
+    pub fn check_isomorphic(&self, other: &Layout) -> bool {
         match self.size() == other.size() {
             true => (0..self.size()).all(|index| self.value(index) == other.value(index)),
             false => false,
@@ -382,8 +418,7 @@ impl Layout {
         if self.is_zero() {
             return true;
         }
-        self.0
-            .iter()
+        self.iter()
             .filter(|(n, _)| *n > 1)
             .map(|&(n, d)| (d, (n - 1) * d))
             .tuple_combinations()
@@ -393,12 +428,12 @@ impl Layout {
     /// Simplifies a layout to some length.
     #[inline]
     pub fn coalesce_to(&self, len: usize) -> Self {
-        let mut layout = self.0.clone();
+        let mut layout = self.to_vec();
         loop {
             if layout.len() <= len.max(1) {
-                break Self(layout);
+                break Self::from(layout);
             }
-            let coalesced = [layout.clone(), vec![(1, 0)]]
+            let coalesced = [&layout[..], &[(1, 0)]]
                 .concat()
                 .into_iter()
                 .tuples()
@@ -410,7 +445,7 @@ impl Layout {
                 })
                 .concat();
             if coalesced == layout {
-                break Self(layout);
+                break Self::from(layout);
             }
             layout = coalesced;
         }
@@ -426,8 +461,7 @@ impl Layout {
     #[inline]
     pub fn sort(&self) -> Self {
         Self(
-            self.0
-                .iter()
+            self.iter()
                 .cloned()
                 .sorted_by_key(|&(n, d)| (d, n))
                 .collect(),
@@ -438,8 +472,7 @@ impl Layout {
     #[inline]
     pub fn filter(&self) -> Self {
         Self(
-            self.0
-                .iter()
+            self.iter()
                 .cloned()
                 .filter(|&(n, d)| d != 0 && n != 1)
                 .collect(),
@@ -455,12 +488,12 @@ impl Layout {
         }
 
         let stride = layout.stride();
-        let product = layout.0.iter().map(|(n, d)| n * d).collect_vec();
+        let product = layout.iter().map(|(n, d)| n * d).collect_vec();
 
-        let stride = [stride.0, vec![size]].concat(); // [d0, d1, ..., dα, M]
+        let stride = [&stride[..], &[size]].concat(); // [d0, d1, ..., dα, M]
         let product = [vec![1], product].concat(); // [1, N0 d0, N1 d1, ..., Nα dα]
 
-        let shape: Vec<_> = stride
+        let shape: Arc<_> = stride
             .iter()
             .zip_eq(product.iter())
             .map(|(d, p)| match d % p {
@@ -481,9 +514,8 @@ impl Layout {
 
     /// Stack another layout onto `self`.
     #[inline]
-    fn concat(&self, other: impl Borrow<Self>) -> Self {
-        let other: &Self = other.borrow();
-        Self([&self.0[..], &other.0[..]].concat())
+    fn concat(&self, other: &Self) -> Self {
+        Self::from([&self[..], &other[..]].concat())
     }
 
     /// Make a tiler from this layout.
@@ -492,7 +524,7 @@ impl Layout {
         let (shape, stride): (Vec<_>, Vec<_>) = tile.into_iter().unzip();
         let stride = stride
             .into_iter()
-            .zip_eq(self.0.iter())
+            .zip_eq(self.iter())
             .map(|(d, &(_, r))| d * r)
             .collect_vec();
         Self::from_shape_stride(shape, stride)
@@ -502,9 +534,8 @@ impl Layout {
     ///
     /// `A ⊘ B := A ∘ (B, B∗)`.
     #[inline]
-    pub fn div(&self, tile: impl Borrow<Self>) -> Result<Self, LayoutError> {
-        let tile: &Self = tile.borrow();
-        tile.concat(tile.complement(self.size())?).compose(self)
+    pub fn div(&self, tile: &Self) -> Result<Self, LayoutError> {
+        tile.concat(&tile.complement(self.size())?).compose(self)
     }
 
     /// Shortcut for calling [`Self::div`] on `self.tiler(tile)`.
@@ -513,17 +544,16 @@ impl Layout {
         &self,
         tile: impl IntoIterator<Item = (usize, usize)>,
     ) -> Result<Self, LayoutError> {
-        self.div(self.tiler(tile))
+        self.div(&self.tiler(tile))
     }
 
     /// [Tile product](https://github.com/NVIDIA/cutlass/blob/main/media/docs/cute/02_layout_algebra.md#product-tiling).
     ///
     /// `A ⊗ B := (A, A∗ ∘ B)`.
     #[inline]
-    pub fn prod(&self, tile: impl Borrow<Self>) -> Result<Self, LayoutError> {
-        let tile: &Self = tile.borrow();
+    pub fn prod(&self, tile: &Self) -> Result<Self, LayoutError> {
         let size = self.size() * tile.full_size();
-        Ok(self.concat(tile.compose(self.complement(size)?)?))
+        Ok(self.concat(&tile.compose(self.complement(size)?)?))
     }
 }
 
@@ -532,9 +562,8 @@ impl IndexFn<&Coord> for Layout {
 
     #[inline]
     fn value(&self, index: &Coord) -> usize {
-        self.0
-            .iter()
-            .zip_eq(index.0.iter())
+        self.iter()
+            .zip_eq(index.iter())
             .map(|(&(_, d), &x)| d * x)
             .sum()
     }
@@ -595,12 +624,12 @@ impl Compose<&Layout> for (usize, usize) {
                         let i = i - 1;
                         let c = r[i];
                         let s = q.shape_mod(n)?;
-                        let s = match s.0.last() {
-                            Some(1) => Shape::from_slice(&s.0[..s.len() - 1]),
+                        let s = match s.last() {
+                            Some(1) => Shape::from_slice(&s[..s.len() - 1]),
                             _ => s,
                         };
-                        let mut d = Stride::from(d.0[i..i + s.len()].to_vec());
-                        d.0[0] *= c;
+                        let mut d = d[i..i + s.len()].to_vec();
+                        d[0] *= c;
                         Ok(Layout::from_shape_stride(s, d))
                     }
                 }
@@ -635,7 +664,7 @@ impl Compose<&Layout> for Layout {
         if !self.check_disjoint() {
             return Err(LayoutError::Disjoint(self.clone()));
         }
-        let modes: Vec<_> = self.0.iter().map(|&mode| mode.compose(f)).try_collect()?;
+        let modes: Vec<_> = self.iter().map(|&mode| mode.compose(f)).try_collect()?;
         let layout = modes
             .into_iter()
             .fold(Layout::default(), |acc, x| acc.concat(&x));
@@ -740,8 +769,8 @@ mod tests {
             .collect_vec();
 
         let n = layout.len() / 2;
-        let x: usize = layout.0.iter().take(n).map(|&(n, _)| n).product();
-        let y: usize = layout.0.iter().skip(n).map(|&(n, _)| n).product();
+        let x: usize = layout.iter().take(n).map(|&(n, _)| n).product();
+        let y: usize = layout.iter().skip(n).map(|&(n, _)| n).product();
 
         println!("{layout}");
         for j in 0..y {
@@ -760,8 +789,8 @@ mod tests {
             .collect_vec();
 
         let n = layout.len() / 2;
-        let x: usize = layout.0.iter().take(n).map(|&(n, _)| n).product();
-        let y: usize = layout.0.iter().skip(n).map(|&(n, _)| n).product();
+        let x: usize = layout.iter().take(n).map(|&(n, _)| n).product();
+        let y: usize = layout.iter().skip(n).map(|&(n, _)| n).product();
 
         println!("{layout}");
         for j in 0..y {
@@ -777,67 +806,67 @@ mod tests {
     fn test_isomorphism() {
         let layout = Layout::from_shape_stride([2, 3, 4], [3, 1, 6]);
 
-        assert_eq!(layout.iota(0), Coord(vec![0, 0, 0]));
-        assert_eq!(layout.iota(1), Coord(vec![1, 0, 0]));
-        assert_eq!(layout.iota(2), Coord(vec![0, 1, 0]));
-        assert_eq!(layout.iota(3), Coord(vec![1, 1, 0]));
-        assert_eq!(layout.iota(4), Coord(vec![0, 2, 0]));
-        assert_eq!(layout.iota(5), Coord(vec![1, 2, 0]));
+        assert_eq!(layout.iota(0), Coord::from([0, 0, 0]));
+        assert_eq!(layout.iota(1), Coord::from([1, 0, 0]));
+        assert_eq!(layout.iota(2), Coord::from([0, 1, 0]));
+        assert_eq!(layout.iota(3), Coord::from([1, 1, 0]));
+        assert_eq!(layout.iota(4), Coord::from([0, 2, 0]));
+        assert_eq!(layout.iota(5), Coord::from([1, 2, 0]));
 
-        assert_eq!(layout.iota(6), Coord(vec![0, 0, 1]));
-        assert_eq!(layout.iota(7), Coord(vec![1, 0, 1]));
-        assert_eq!(layout.iota(8), Coord(vec![0, 1, 1]));
-        assert_eq!(layout.iota(9), Coord(vec![1, 1, 1]));
-        assert_eq!(layout.iota(10), Coord(vec![0, 2, 1]));
-        assert_eq!(layout.iota(11), Coord(vec![1, 2, 1]));
+        assert_eq!(layout.iota(6), Coord::from([0, 0, 1]));
+        assert_eq!(layout.iota(7), Coord::from([1, 0, 1]));
+        assert_eq!(layout.iota(8), Coord::from([0, 1, 1]));
+        assert_eq!(layout.iota(9), Coord::from([1, 1, 1]));
+        assert_eq!(layout.iota(10), Coord::from([0, 2, 1]));
+        assert_eq!(layout.iota(11), Coord::from([1, 2, 1]));
 
-        assert_eq!(layout.iota(12), Coord(vec![0, 0, 2]));
-        assert_eq!(layout.iota(13), Coord(vec![1, 0, 2]));
-        assert_eq!(layout.iota(14), Coord(vec![0, 1, 2]));
-        assert_eq!(layout.iota(15), Coord(vec![1, 1, 2]));
-        assert_eq!(layout.iota(16), Coord(vec![0, 2, 2]));
-        assert_eq!(layout.iota(17), Coord(vec![1, 2, 2]));
+        assert_eq!(layout.iota(12), Coord::from([0, 0, 2]));
+        assert_eq!(layout.iota(13), Coord::from([1, 0, 2]));
+        assert_eq!(layout.iota(14), Coord::from([0, 1, 2]));
+        assert_eq!(layout.iota(15), Coord::from([1, 1, 2]));
+        assert_eq!(layout.iota(16), Coord::from([0, 2, 2]));
+        assert_eq!(layout.iota(17), Coord::from([1, 2, 2]));
 
-        assert_eq!(layout.iota(18), Coord(vec![0, 0, 3]));
-        assert_eq!(layout.iota(19), Coord(vec![1, 0, 3]));
-        assert_eq!(layout.iota(20), Coord(vec![0, 1, 3]));
-        assert_eq!(layout.iota(21), Coord(vec![1, 1, 3]));
-        assert_eq!(layout.iota(22), Coord(vec![0, 2, 3]));
-        assert_eq!(layout.iota(23), Coord(vec![1, 2, 3]));
+        assert_eq!(layout.iota(18), Coord::from([0, 0, 3]));
+        assert_eq!(layout.iota(19), Coord::from([1, 0, 3]));
+        assert_eq!(layout.iota(20), Coord::from([0, 1, 3]));
+        assert_eq!(layout.iota(21), Coord::from([1, 1, 3]));
+        assert_eq!(layout.iota(22), Coord::from([0, 2, 3]));
+        assert_eq!(layout.iota(23), Coord::from([1, 2, 3]));
 
-        assert_eq!(layout.iota(24), Coord(vec![0, 0, 0]));
-        assert_eq!(layout.iota(25), Coord(vec![1, 0, 0]));
+        assert_eq!(layout.iota(24), Coord::from([0, 0, 0]));
+        assert_eq!(layout.iota(25), Coord::from([1, 0, 0]));
 
-        assert_eq!(layout.iota_extend(0), Coord(vec![0, 0, 0]));
-        assert_eq!(layout.iota_extend(1), Coord(vec![1, 0, 0]));
-        assert_eq!(layout.iota_extend(2), Coord(vec![0, 1, 0]));
-        assert_eq!(layout.iota_extend(3), Coord(vec![1, 1, 0]));
-        assert_eq!(layout.iota_extend(4), Coord(vec![0, 2, 0]));
-        assert_eq!(layout.iota_extend(5), Coord(vec![1, 2, 0]));
+        assert_eq!(layout.iota_extend(0), Coord::from([0, 0, 0]));
+        assert_eq!(layout.iota_extend(1), Coord::from([1, 0, 0]));
+        assert_eq!(layout.iota_extend(2), Coord::from([0, 1, 0]));
+        assert_eq!(layout.iota_extend(3), Coord::from([1, 1, 0]));
+        assert_eq!(layout.iota_extend(4), Coord::from([0, 2, 0]));
+        assert_eq!(layout.iota_extend(5), Coord::from([1, 2, 0]));
 
-        assert_eq!(layout.iota_extend(6), Coord(vec![0, 0, 1]));
-        assert_eq!(layout.iota_extend(7), Coord(vec![1, 0, 1]));
-        assert_eq!(layout.iota_extend(8), Coord(vec![0, 1, 1]));
-        assert_eq!(layout.iota_extend(9), Coord(vec![1, 1, 1]));
-        assert_eq!(layout.iota_extend(10), Coord(vec![0, 2, 1]));
-        assert_eq!(layout.iota_extend(11), Coord(vec![1, 2, 1]));
+        assert_eq!(layout.iota_extend(6), Coord::from([0, 0, 1]));
+        assert_eq!(layout.iota_extend(7), Coord::from([1, 0, 1]));
+        assert_eq!(layout.iota_extend(8), Coord::from([0, 1, 1]));
+        assert_eq!(layout.iota_extend(9), Coord::from([1, 1, 1]));
+        assert_eq!(layout.iota_extend(10), Coord::from([0, 2, 1]));
+        assert_eq!(layout.iota_extend(11), Coord::from([1, 2, 1]));
 
-        assert_eq!(layout.iota_extend(12), Coord(vec![0, 0, 2]));
-        assert_eq!(layout.iota_extend(13), Coord(vec![1, 0, 2]));
-        assert_eq!(layout.iota_extend(14), Coord(vec![0, 1, 2]));
-        assert_eq!(layout.iota_extend(15), Coord(vec![1, 1, 2]));
-        assert_eq!(layout.iota_extend(16), Coord(vec![0, 2, 2]));
-        assert_eq!(layout.iota_extend(17), Coord(vec![1, 2, 2]));
+        assert_eq!(layout.iota_extend(12), Coord::from([0, 0, 2]));
+        assert_eq!(layout.iota_extend(13), Coord::from([1, 0, 2]));
+        assert_eq!(layout.iota_extend(14), Coord::from([0, 1, 2]));
+        assert_eq!(layout.iota_extend(15), Coord::from([1, 1, 2]));
+        assert_eq!(layout.iota_extend(16), Coord::from([0, 2, 2]));
+        assert_eq!(layout.iota_extend(17), Coord::from([1, 2, 2]));
 
-        assert_eq!(layout.iota_extend(18), Coord(vec![0, 0, 3]));
-        assert_eq!(layout.iota_extend(19), Coord(vec![1, 0, 3]));
-        assert_eq!(layout.iota_extend(20), Coord(vec![0, 1, 3]));
-        assert_eq!(layout.iota_extend(21), Coord(vec![1, 1, 3]));
-        assert_eq!(layout.iota_extend(22), Coord(vec![0, 2, 3]));
-        assert_eq!(layout.iota_extend(23), Coord(vec![1, 2, 3]));
+        assert_eq!(layout.iota_extend(18), Coord::from([0, 0, 3]));
+        assert_eq!(layout.iota_extend(19), Coord::from([1, 0, 3]));
+        assert_eq!(layout.iota_extend(20), Coord::from([0, 1, 3]));
+        assert_eq!(layout.iota_extend(21), Coord::from([1, 1, 3]));
+        assert_eq!(layout.iota_extend(22), Coord::from([0, 2, 3]));
+        assert_eq!(layout.iota_extend(23), Coord::from([1, 2, 3]));
 
-        assert_eq!(layout.iota_extend(24), Coord(vec![0, 0, 4]));
-        assert_eq!(layout.iota_extend(25), Coord(vec![1, 0, 4]));
+        assert_eq!(layout.iota_extend(24), Coord::from([0, 0, 4]));
+        assert_eq!(layout.iota_extend(25), Coord::from([1, 0, 4]));
     }
 
     #[test]
@@ -887,7 +916,7 @@ mod tests {
             }
 
             // 4. complement
-            assert!(layout.concat(complement).complement_full().size() <= 1);
+            assert!(layout.concat(&complement).complement_full().size() <= 1);
 
             Ok(())
         }
