@@ -121,7 +121,7 @@ impl One for PackedU8x4 {
     }
 }
 
-pub trait Scalar: Sized + Pod + Zero + One + Send + Sync + sealed::Sealed {
+pub trait Scalar: Sized + Pod + Zero + Send + Sync {
     const DATA_TYPE: DataType;
 }
 
@@ -157,19 +157,3 @@ impl Scalar for PackedU8x4 {
 
 impl Float for f32 {}
 impl Float for f16 {}
-
-mod sealed {
-    use half::f16;
-
-    use super::{PackedU4x8, PackedU8x4};
-
-    pub trait Sealed {}
-
-    impl Sealed for f32 {}
-    impl Sealed for f16 {}
-    impl Sealed for u8 {}
-    impl Sealed for u16 {}
-    impl Sealed for u32 {}
-    impl Sealed for PackedU4x8 {}
-    impl Sealed for PackedU8x4 {}
-}

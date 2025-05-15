@@ -55,8 +55,6 @@ impl<T: Scalar> Tensor<Gpu, T> {
 pub trait TensorInit<D: Device, T: Scalar> {
     /// Init a tensor of zeros.
     fn zeros(device: D, layout: Layout) -> impl Future<Tensor<D, T>>;
-    /// Init a tensor of ones.
-    fn ones(device: D, layout: Layout) -> impl Future<Tensor<D, T>>;
     /// Create a tensor from data.
     fn create(
         device: D,
@@ -79,11 +77,6 @@ impl<T: Scalar> TensorInit<Cpu, T> for Tensor<Cpu, T> {
             id,
             phantom,
         }
-    }
-
-    async fn ones(device: Cpu, layout: Layout) -> Tensor<Cpu, T> {
-        let data = vec![T::one(); layout.len()];
-        Self::create(device, layout, &data).await.unwrap()
     }
 
     async fn create(
@@ -123,11 +116,6 @@ impl<T: Scalar> TensorInit<Gpu, T> for Tensor<Gpu, T> {
             id,
             phantom,
         }
-    }
-
-    async fn ones(device: Gpu, layout: Layout) -> Tensor<Gpu, T> {
-        let data = vec![T::one(); layout.len()];
-        Self::create(device, layout, &data).await.unwrap()
     }
 
     async fn create(
