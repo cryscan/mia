@@ -33,6 +33,12 @@ pub trait Compose<F> {
 #[display("{_0:?}")]
 pub struct Shape(pub Vec<usize>);
 
+impl From<usize> for Shape {
+    fn from(value: usize) -> Self {
+        Self(vec![value])
+    }
+}
+
 impl<const N: usize> From<[usize; N]> for Shape {
     #[inline]
     fn from(value: [usize; N]) -> Self {
@@ -180,6 +186,12 @@ impl Shape {
 #[display("{_0:?}")]
 pub struct Stride(pub Vec<usize>);
 
+impl From<usize> for Stride {
+    fn from(value: usize) -> Self {
+        Self(vec![value])
+    }
+}
+
 impl<const N: usize> From<[usize; N]> for Stride {
     #[inline]
     fn from(value: [usize; N]) -> Self {
@@ -222,31 +234,20 @@ impl Coord {
 #[display("<{}, {}>", self.shape(), self.stride())]
 pub struct Layout(pub Vec<(usize, usize)>);
 
-impl<S, D> From<(S, D)> for Layout
-where
-    S: Into<Shape>,
-    D: Into<Stride>,
-{
-    #[inline]
-    fn from((s, d): (S, D)) -> Self {
-        Self::from_shape_stride(s, d)
+pub trait IntoLayout {
+    fn into_layout(self) -> Layout;
+}
+
+impl<S: Into<Shape>, D: Into<Stride>> IntoLayout for (S, D) {
+    fn into_layout(self) -> Layout {
+        let (shape, stride) = self;
+        Layout::from_shape_stride(shape.into(), stride.into())
     }
 }
 
-impl<S> From<S> for Layout
-where
-    S: Into<Shape>,
-{
-    #[inline]
-    fn from(s: S) -> Self {
-        Self::from_shape(s)
-    }
-}
-
-impl From<(usize, usize)> for Layout {
-    #[inline]
-    fn from((s, d): (usize, usize)) -> Self {
-        Self::from_shape_stride([s], [d])
+impl<S: Into<Shape>> IntoLayout for S {
+    fn into_layout(self) -> Layout {
+        Layout::from_shape(self.into())
     }
 }
 
@@ -468,7 +469,7 @@ impl Layout {
             })
             .try_collect()?;
 
-        Ok(Self::from((shape, product)).coalesce_to(self.len()))
+        Ok(Self::from_shape_stride(shape, product).coalesce_to(self.len()))
     }
 
     /// Complement the layout to its full size, which is the least size that is admissible for completion.
@@ -494,7 +495,7 @@ impl Layout {
             .zip_eq(self.0.iter())
             .map(|(d, &(_, r))| d * r)
             .collect_vec();
-        Self::from((shape, stride))
+        Self::from_shape_stride(shape, stride)
     }
 
     /// [Tile division](https://github.com/NVIDIA/cutlass/blob/main/media/docs/cute/02_layout_algebra.md#division-tiling).
@@ -582,14 +583,14 @@ impl Compose<&Layout> for (usize, usize) {
     fn compose(&self, f: &Layout) -> Self::Output {
         let &(n, r) = self;
         match n {
-            0 | 1 => Ok(Layout::from((n, r))),
+            0 | 1 => Ok(Layout::from_shape_stride(n, r)),
             n => {
                 let s = f.shape();
                 let d = f.stride();
                 let (q, r) = s.shape_div(r)?;
                 match r.len() {
-                    0 => Ok(Layout::from((n, 0))),
-                    i if i == s.len() => Ok(Layout::from((n, r[i - 1] * d[i - 1]))),
+                    0 => Ok(Layout::from_shape_stride(n, 0)),
+                    i if i == s.len() => Ok(Layout::from_shape_stride(n, r[i - 1] * d[i - 1])),
                     i => {
                         let i = i - 1;
                         let c = r[i];
@@ -600,7 +601,7 @@ impl Compose<&Layout> for (usize, usize) {
                         };
                         let mut d = Stride::from(d.0[i..i + s.len()].to_vec());
                         d.0[0] *= c;
-                        Ok(Layout::from((s, d)))
+                        Ok(Layout::from_shape_stride(s, d))
                     }
                 }
             }
@@ -726,21 +727,17 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Borrow;
-
     use itertools::Itertools;
 
-    use super::{Compose, Coord, IndexFn, Layout, LayoutError, Shape, Swizzle};
+    use super::{Compose, Coord, IndexFn, IntoLayout, Layout, LayoutError, Shape, Swizzle};
 
     #[allow(unused)]
-    fn print_tensor(data: &[usize], layout: impl Borrow<Layout>) {
-        let layout: &Layout = layout.borrow();
+    fn print_tensor(data: &[usize], layout: &Layout) {
         assert_eq!(data.len(), layout.size());
 
-        let mut sketch = vec![0; layout.size()];
-        for i in 0..layout.size() {
-            sketch[i] = data[layout.value(i)];
-        }
+        let sketch = (0..layout.size())
+            .map(|index| data[layout.value(index)])
+            .collect_vec();
 
         let n = layout.len() / 2;
         let x: usize = layout.0.iter().take(n).map(|&(n, _)| n).product();
@@ -757,13 +754,10 @@ mod tests {
     }
 
     #[allow(unused)]
-    fn print_layout(layout: impl Borrow<Layout>) {
-        let layout: &Layout = layout.borrow();
-
-        let mut sketch = vec![0; layout.size()];
-        for i in 0..layout.size() {
-            sketch[i] = layout.value(i);
-        }
+    fn print_layout(layout: &Layout) {
+        let sketch = (0..layout.size())
+            .map(|index| layout.value(index))
+            .collect_vec();
 
         let n = layout.len() / 2;
         let x: usize = layout.0.iter().take(n).map(|&(n, _)| n).product();
@@ -781,7 +775,7 @@ mod tests {
 
     #[test]
     fn test_isomorphism() {
-        let layout = Layout::from(([2, 3, 4], [3, 1, 6]));
+        let layout = Layout::from_shape_stride([2, 3, 4], [3, 1, 6]);
 
         assert_eq!(layout.iota(0), Coord(vec![0, 0, 0]));
         assert_eq!(layout.iota(1), Coord(vec![1, 0, 0]));
@@ -848,33 +842,31 @@ mod tests {
 
     #[test]
     fn test_coalesce() {
-        fn check(layout: impl Into<Layout>) {
-            let layout: Layout = layout.into();
+        fn check(layout: Layout) {
             let coalesced = layout.coalesce();
             println!("{layout} → {coalesced}");
             assert!(layout.check_isomorphic(&coalesced))
         }
 
-        check(([1], [0]));
-        check(([1], [1]));
+        check(Layout::from_shape_stride([1], [0]));
+        check(Layout::from_shape_stride([1], [1]));
 
-        check([2, 4]);
-        check([2, 4, 6]);
-        check([2, 4, 6, 2]);
+        check(Layout::from_shape([2, 4]));
+        check(Layout::from_shape([2, 4, 6]));
+        check(Layout::from_shape([2, 4, 6, 2]));
 
-        check(([2, 1, 6], [1, 6, 2]));
-        check(([2, 1, 6], [1, 7, 2]));
+        check(Layout::from_shape_stride([2, 1, 6], [1, 6, 2]));
+        check(Layout::from_shape_stride([2, 1, 6], [1, 7, 2]));
 
-        check(([2, 4, 6], [4, 1, 8]));
-        check(([2, 1, 3], [1, 1, 2]));
-        check(([2, 1, 3], [2, 4, 4]));
-        check(([2, 1, 3], [2, 0, 4]));
+        check(Layout::from_shape_stride([2, 4, 6], [4, 1, 8]));
+        check(Layout::from_shape_stride([2, 1, 3], [1, 1, 2]));
+        check(Layout::from_shape_stride([2, 1, 3], [2, 4, 4]));
+        check(Layout::from_shape_stride([2, 1, 3], [2, 0, 4]));
     }
 
     #[test]
     fn test_complement() -> Result<(), LayoutError> {
-        fn check(layout: impl Borrow<Layout>, size: usize) -> Result<(), LayoutError> {
-            let layout: &Layout = layout.borrow();
+        fn check(layout: &Layout, size: usize) -> Result<(), LayoutError> {
             let complement = layout.complement(size)?;
             println!("{{{layout}, {size}}} → {complement}");
 
@@ -901,21 +893,21 @@ mod tests {
         }
 
         {
-            let layout = Layout::from(([1], [0]));
+            let layout = Layout::from_shape_stride(1, 0);
             check(&layout, 1)?;
             check(&layout, 2)?;
             check(&layout, 5)?;
         }
 
         {
-            let layout = Layout::from(([1], [1]));
+            let layout = Layout::from_shape_stride(1, 1);
             check(&layout, 1)?;
             check(&layout, 2)?;
             check(&layout, 5)?;
         }
 
         {
-            let layout = Layout::from(([1], [2]));
+            let layout = Layout::from_shape_stride(1, 2);
             check(&layout, 1)?;
             check(&layout, 5)?;
             check(&layout, 2)?;
@@ -923,14 +915,14 @@ mod tests {
         }
 
         {
-            let layout = Layout::from(([4], [0]));
+            let layout = Layout::from_shape_stride(4, 0);
             check(&layout, 1)?;
             check(&layout, 2)?;
             check(&layout, 8)?;
         }
 
         {
-            let layout = Layout::from(([4], [1]));
+            let layout = Layout::from_shape_stride(4, 1);
             assert!(check(&layout, 1).is_err());
             assert!(check(&layout, 2).is_err());
             check(&layout, 4)?;
@@ -938,15 +930,15 @@ mod tests {
         }
 
         {
-            let layout = Layout::from(([4], [2]));
+            let layout = Layout::from_shape_stride(4, 2);
             check(&layout, 8)?;
             check(&layout, 16)?;
             assert!(check(&layout, 19).is_err());
         }
 
-        check(Layout::from(([4], [4])), 16)?;
-        check(Layout::from(([4], [4])), 16)?;
-        check(Layout::from(([2, 2], [4, 1])), 32)?;
+        check(&Layout::from_shape_stride(4, 4), 16)?;
+        check(&Layout::from_shape_stride(4, 4), 16)?;
+        check(&Layout::from_shape_stride([2, 2], [4, 1]), 32)?;
 
         Ok(())
     }
@@ -967,9 +959,9 @@ mod tests {
 
     #[test]
     fn test_composition() -> Result<(), LayoutError> {
-        fn check(a: impl Into<Layout>, b: impl Into<Layout>) -> Result<(), LayoutError> {
-            let a: Layout = a.into();
-            let b: Layout = b.into();
+        fn check(a: impl IntoLayout, b: impl IntoLayout) -> Result<(), LayoutError> {
+            let a = a.into_layout();
+            let b = b.into_layout();
 
             let c = a.compose(&b)?;
             println!("{b} ∘ {a} → {c}\n");
@@ -1038,15 +1030,15 @@ mod tests {
 
     #[test]
     fn test_div() -> Result<(), LayoutError> {
-        fn check(layout: impl Into<Layout>, tile: impl Into<Layout>) -> Result<(), LayoutError> {
-            let a: Layout = layout.into();
-            let b: Layout = tile.into();
+        fn check(layout: impl IntoLayout, tile: impl IntoLayout) -> Result<(), LayoutError> {
+            let a = layout.into_layout();
+            let b = tile.into_layout();
             let c = a.div(&b)?;
 
             println!("{a} / {b} = {c}\n");
-            print_layout(a);
-            print_layout(b);
-            print_layout(c);
+            print_layout(&a);
+            print_layout(&b);
+            print_layout(&c);
             println!("------\n");
 
             Ok(())
@@ -1072,15 +1064,15 @@ mod tests {
 
     #[test]
     fn test_prod() -> Result<(), LayoutError> {
-        fn check(layout: impl Into<Layout>, tile: impl Into<Layout>) -> Result<(), LayoutError> {
-            let a: Layout = layout.into();
-            let b: Layout = tile.into();
+        fn check(layout: impl IntoLayout, tile: impl IntoLayout) -> Result<(), LayoutError> {
+            let a = layout.into_layout();
+            let b = tile.into_layout();
             let c = a.prod(&b)?;
 
             println!("{a} • {b} = {c}\n");
-            print_layout(a);
-            print_layout(b);
-            print_layout(c);
+            print_layout(&a);
+            print_layout(&b);
+            print_layout(&c);
             println!("------\n");
 
             Ok(())
@@ -1107,11 +1099,11 @@ mod tests {
             shift: 3,
         };
 
-        let layout_u = Layout::from(([x, y], [1, x]));
-        let layout_v = Layout::from(([y, x], [1, y]));
+        let layout_u = Layout::from_shape_stride([x, y], [1, x]);
+        let layout_v = Layout::from_shape_stride([y, x], [1, y]);
         let layout_v_s = layout_v.compose(swizzle);
 
-        let layout_t = Layout::from(([x, y], [y, 1]));
+        let layout_t = Layout::from_shape_stride([x, y], [y, 1]);
         let layout_t_s = layout_t.compose(swizzle);
 
         for i in 0..src.len() {
@@ -1142,9 +1134,9 @@ mod tests {
         let b = (0..n * k).collect_vec();
         let mut c = vec![0; m * n];
 
-        let layout_a = Layout::from([m, k]); // M-major
-        let layout_b = Layout::from([n, k]); // N-major
-        let layout_c = Layout::from([m, n]); // M-major
+        let layout_a = Layout::from_shape([m, k]); // M-major
+        let layout_b = Layout::from_shape([n, k]); // N-major
+        let layout_c = Layout::from_shape([m, n]); // M-major
 
         print_tensor(&a, &layout_a);
         print_tensor(&b, &layout_b);
@@ -1162,8 +1154,8 @@ mod tests {
         let mut sa = vec![0; bm * bk];
         let mut sb = vec![0; bn * bk];
 
-        let layout_sa = Layout::from([bm, bk]);
-        let layout_sb = Layout::from([bn, bk]);
+        let layout_sa = Layout::from_shape([bm, bk]);
+        let layout_sb = Layout::from_shape([bn, bk]);
 
         for (k, j, i) in itertools::iproduct!(
             0..layout_ta.shape_of(3),
