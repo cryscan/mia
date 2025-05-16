@@ -18,7 +18,7 @@ pub enum TensorError {
     Create(Layout, usize),
     #[error("tensor reshape error: layout {0}'s size not match layout {1}'s")]
     Reshape(Layout, Layout),
-    #[error("tensor slice error: slice {1} out of range of layout {0}")]
+    #[error("tensor slice error: slice {1} is not compatible with layout {0}")]
     Slice(Layout, Slice),
 }
 
@@ -214,11 +214,32 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
     #[inline]
     pub fn reshape(mut self, layout: Layout) -> Result<Self, TensorError> {
         if self.layout.size() != layout.size() {
-            return Err(TensorError::Reshape(self.layout.clone(), layout));
+            return Err(TensorError::Reshape(self.layout(), layout));
         }
         self.layout = layout;
         self.id = uid::Id::new();
         Ok(self)
+    }
+
+    /// Create a [`TensorSlice`] from the tensor.
+    #[inline]
+    pub fn slice(self, slice: Slice) -> Result<TensorSlice<D, T>, TensorError> {
+        if slice.len() != self.layout.len() {
+            return Err(TensorError::Slice(self.layout(), slice));
+        }
+        if slice
+            .iter()
+            .zip_eq(self.layout.shape().iter())
+            .filter_map(|(&axis, &shape)| match axis {
+                Axis::Full => None,
+                Axis::One(index) => Some((index, shape)),
+            })
+            .any(|(index, shape)| index >= shape)
+        {
+            return Err(TensorError::Slice(self.layout(), slice));
+        }
+        let tensor = self;
+        Ok(TensorSlice { tensor, slice })
     }
 }
 
@@ -301,21 +322,14 @@ impl Slice {
     }
 }
 
-#[derive(Debug, Clone, Deref, Eq)]
-pub struct TensorView<D: Device, T: Scalar> {
+#[derive(Debug, Clone, Deref, PartialEq, Eq)]
+pub struct TensorSlice<D: Device, T: Scalar> {
     #[deref]
     tensor: Tensor<D, T>,
     slice: Slice,
-    id: uid::Id<TensorId>,
 }
 
-impl<D: Device, T: Scalar> PartialEq for TensorView<D, T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-impl<D: Device, T: Scalar> TensorView<D, T> {
+impl<D: Device, T: Scalar> TensorSlice<D, T> {
     #[inline]
     pub fn slice(&self) -> Slice {
         self.slice.clone()
