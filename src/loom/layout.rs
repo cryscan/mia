@@ -31,7 +31,7 @@ pub trait Compose<F> {
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into, Display)]
 #[display("{_0:?}")]
-pub struct Shape(pub Arc<[usize]>);
+pub struct Shape(Arc<[usize]>);
 
 impl From<usize> for Shape {
     fn from(value: usize) -> Self {
@@ -196,7 +196,7 @@ impl Shape {
 /// Defines the step to add to when increase 1 along coordinates.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into, Display)]
 #[display("{_0:?}")]
-pub struct Stride(pub Arc<[usize]>);
+pub struct Stride(Arc<[usize]>);
 
 impl From<usize> for Stride {
     fn from(value: usize) -> Self {
@@ -235,7 +235,7 @@ impl Stride {
 /// A multi-dimensional coordinate.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into, Display)]
 #[display("{_0:?}")]
-pub struct Coord(pub Arc<[usize]>);
+pub struct Coord(Arc<[usize]>);
 
 impl From<usize> for Coord {
     fn from(value: usize) -> Self {
@@ -278,7 +278,7 @@ impl Coord {
 /// 2. [A note on the algebra of CuTe Layouts](https://leimao.github.io/downloads/article/2024-10-20-CuTe-Layout-Algebra/layout_algebra.pdf).
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into, Display)]
 #[display("<{}, {}>", self.shape(), self.stride())]
-pub struct Layout(pub Arc<[(usize, usize)]>);
+pub struct Layout(Arc<[(usize, usize)]>);
 
 impl From<Vec<(usize, usize)>> for Layout {
     #[inline]
