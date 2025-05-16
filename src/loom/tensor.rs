@@ -1,6 +1,7 @@
 use std::{marker::PhantomData, sync::Arc};
 
 use casey::snake;
+use derivative::Derivative;
 use derive_more::{Deref, DerefMut, Display, From, Into};
 use itertools::Itertools;
 use thiserror::Error;
@@ -13,21 +14,46 @@ use crate::{future::Future, num::Scalar};
 
 #[derive(Debug, Error)]
 pub enum TensorError {
-    #[error("tensor creation error: size not match, layout {0}'s size not match data len {1}")]
+    #[error("tensor creation error: layout {0}'s size not match data len {1}")]
     Create(Layout, usize),
+    #[error("tensor reshape error: layout {0}'s size not match layout {1}'s")]
+    Reshape(Layout, Layout),
+    #[error("tensor slice error: slice {1} out of range of layout {0}")]
+    Slice(Layout, Slice),
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TensorId;
 
-#[derive(Debug, Clone)]
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct Tensor<D: Device, T: Scalar> {
-    pub device: D,
-    pub layout: Layout,
-    pub slice: Slice,
-    pub data: Arc<D::Data>,
-    pub id: uid::Id<TensorId>,
-    pub phantom: PhantomData<T>,
+    device: D,
+    layout: Layout,
+    #[derivative(Debug = "ignore")]
+    data: Arc<D::Data>,
+    id: uid::Id<TensorId>,
+    phantom: PhantomData<T>,
+}
+
+impl<D: Device, T: Scalar> PartialEq for Tensor<D, T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl<D: Device, T: Scalar> Eq for Tensor<D, T> {}
+
+impl<D: Device + Clone, T: Scalar> Clone for Tensor<D, T> {
+    fn clone(&self) -> Self {
+        Self {
+            device: self.device.clone(),
+            layout: self.layout.clone(),
+            data: self.data.clone(),
+            id: self.id,
+            phantom: PhantomData,
+        }
+    }
 }
 
 impl<D: Device, T: Scalar> Drop for Tensor<D, T> {
@@ -62,13 +88,11 @@ pub trait TensorInit<D: Device, T: Scalar>: Sized {
 impl<T: Scalar> TensorInit<Cpu, T> for Tensor<Cpu, T> {
     async fn zeros(device: Cpu, layout: Layout) -> Self {
         let data = device.alloc::<T>(layout.size(), ()).await;
-        let slice = Slice(vec![Axis::Full; layout.len()]);
         let id = uid::Id::new();
         let phantom = PhantomData;
         Self {
             device,
             layout,
-            slice,
             data,
             id,
             phantom,
@@ -80,13 +104,11 @@ impl<T: Scalar> TensorInit<Cpu, T> for Tensor<Cpu, T> {
             return Err(TensorError::Create(layout, data.len()));
         }
         let data = device.create(data, ()).await;
-        let slice = Slice(vec![Axis::Full; layout.len()]);
         let id = uid::Id::new();
         let phantom = PhantomData;
         Ok(Self {
             device,
             layout,
-            slice,
             data,
             id,
             phantom,
@@ -97,13 +119,11 @@ impl<T: Scalar> TensorInit<Cpu, T> for Tensor<Cpu, T> {
 impl<T: Scalar> TensorInit<Gpu, T> for Tensor<Gpu, T> {
     async fn zeros(device: Gpu, layout: Layout) -> Self {
         let data = device.alloc::<T>(layout.size(), Self::PARAMS).await;
-        let slice = Slice(vec![Axis::Full; layout.len()]);
         let id = uid::Id::new();
         let phantom = PhantomData;
         Self {
             device,
             layout,
-            slice,
             data,
             id,
             phantom,
@@ -115,13 +135,11 @@ impl<T: Scalar> TensorInit<Gpu, T> for Tensor<Gpu, T> {
             return Err(TensorError::Create(layout, data.len()));
         }
         let data = device.create(data, Self::PARAMS).await;
-        let slice = Slice(vec![Axis::Full; layout.len()]);
         let id = uid::Id::new();
         let phantom = PhantomData;
         Ok(Self {
             device,
             layout,
-            slice,
             data,
             id,
             phantom,
@@ -146,14 +164,12 @@ impl<T: Scalar> TensorTo<Gpu, T> for Tensor<Cpu, T> {
     async fn to(self, device: Gpu) -> Tensor<Gpu, T> {
         let data = device.create(self.data(), Tensor::<Gpu, T>::PARAMS).await;
         let layout = self.layout.clone();
-        let slice = self.slice.clone();
         let id = uid::Id::new();
         let phantom = PhantomData;
         Tensor {
             device,
             layout,
             data,
-            slice,
             id,
             phantom,
         }
@@ -165,14 +181,12 @@ impl<T: Scalar> TensorTo<Cpu, T> for Tensor<Gpu, T> {
     async fn to(self, device: Cpu) -> Tensor<Cpu, T> {
         let data = self.device.read(&self.data).await.into();
         let layout = self.layout.clone();
-        let slice = self.slice.clone();
         let id = uid::Id::new();
         let phantom = PhantomData;
         Tensor {
             device,
             layout,
             data,
-            slice,
             id,
             phantom,
         }
@@ -187,6 +201,24 @@ impl<T: Scalar> TensorTo<Gpu, T> for Tensor<Gpu, T> {
         }
         let cpu: Tensor<Cpu, T> = self.to(Cpu::new()).await;
         cpu.to(device).await
+    }
+}
+
+impl<D: Device, T: Scalar> Tensor<D, T> {
+    #[inline]
+    pub fn layout(&self) -> Layout {
+        self.layout.clone()
+    }
+
+    /// Reshape the tensor, leaving the underlying data untouched.
+    #[inline]
+    pub fn reshape(mut self, layout: Layout) -> Result<Self, TensorError> {
+        if self.layout.size() != layout.size() {
+            return Err(TensorError::Reshape(self.layout.clone(), layout));
+        }
+        self.layout = layout;
+        self.id = uid::Id::new();
+        Ok(self)
     }
 }
 
@@ -215,14 +247,21 @@ impl From<std::ops::RangeFull> for Axis {
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into, Display)]
 #[display("[{}]", _0.iter().format(", "))]
-pub struct Slice(pub Vec<Axis>);
+pub struct Slice(Arc<[Axis]>);
+
+impl From<Vec<Axis>> for Slice {
+    #[inline]
+    fn from(value: Vec<Axis>) -> Self {
+        Self(value.into())
+    }
+}
 
 macro_rules! impl_slice_from {
     ($t:ident) => {
         impl<$t: Into<Axis>> From<$t> for Slice {
             #[inline]
             fn from(snake!($t): $t) -> Self {
-                Self(vec![snake!($t).into()])
+                Self([snake!($t).into()].into())
             }
         }
     };
@@ -233,7 +272,7 @@ macro_rules! impl_slice_from {
         {
             #[inline]
             fn from(($(snake!($t)),+): ($($t),+)) -> Self {
-                Self(vec![$(snake!($t).into()),+])
+                Self([$(snake!($t).into()),+].into())
             }
         }
     };
@@ -247,6 +286,41 @@ impl_slice_from!(T0, T1, T2, T3, T4);
 impl_slice_from!(T0, T1, T2, T3, T4, T5);
 impl_slice_from!(T0, T1, T2, T3, T4, T5, T6);
 impl_slice_from!(T0, T1, T2, T3, T4, T5, T6, T7);
+
+impl Slice {
+    /// Creates a full slice of the same mode as a `Layout`.
+    #[inline]
+    pub fn from_layout(layout: Layout) -> Self {
+        Self::from(vec![Axis::Full; layout.len()])
+    }
+
+    /// Returns `true` if the slice contains only full axes.
+    #[inline]
+    pub fn is_full(&self) -> bool {
+        self.iter().all(|&axis| matches!(axis, Axis::Full))
+    }
+}
+
+#[derive(Debug, Clone, Deref, Eq)]
+pub struct TensorView<D: Device, T: Scalar> {
+    #[deref]
+    tensor: Tensor<D, T>,
+    slice: Slice,
+    id: uid::Id<TensorId>,
+}
+
+impl<D: Device, T: Scalar> PartialEq for TensorView<D, T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl<D: Device, T: Scalar> TensorView<D, T> {
+    #[inline]
+    pub fn slice(&self) -> Slice {
+        self.slice.clone()
+    }
+}
 
 #[cfg(test)]
 mod tests {
