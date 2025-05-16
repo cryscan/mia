@@ -1,7 +1,10 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{
+    fmt::{Debug, Formatter},
+    marker::PhantomData,
+    sync::Arc,
+};
 
 use casey::snake;
-use derivative::Derivative;
 use derive_more::{Deref, DerefMut, Display, From, Into};
 use itertools::Itertools;
 use thiserror::Error;
@@ -25,24 +28,23 @@ pub enum TensorError {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TensorId;
 
-#[derive(Derivative)]
-#[derivative(Debug)]
 pub struct Tensor<D: Device, T: Scalar> {
     device: D,
     layout: Layout,
-    #[derivative(Debug = "ignore")]
     data: Arc<D::Data>,
     id: uid::Id<TensorId>,
     phantom: PhantomData<T>,
 }
 
-impl<D: Device, T: Scalar> PartialEq for Tensor<D, T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
+impl<D: Device + Debug, T: Scalar> Debug for Tensor<D, T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tensor")
+            .field("device", &self.device)
+            .field("layout", &self.layout)
+            .field("id", &self.id)
+            .finish()
     }
 }
-
-impl<D: Device, T: Scalar> Eq for Tensor<D, T> {}
 
 impl<D: Device + Clone, T: Scalar> Clone for Tensor<D, T> {
     fn clone(&self) -> Self {
@@ -55,6 +57,14 @@ impl<D: Device + Clone, T: Scalar> Clone for Tensor<D, T> {
         }
     }
 }
+
+impl<D: Device, T: Scalar> PartialEq for Tensor<D, T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl<D: Device, T: Scalar> Eq for Tensor<D, T> {}
 
 impl<D: Device, T: Scalar> Drop for Tensor<D, T> {
     fn drop(&mut self) {
