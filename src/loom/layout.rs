@@ -35,7 +35,7 @@ pub struct Shape(pub Arc<[usize]>);
 
 impl From<usize> for Shape {
     fn from(value: usize) -> Self {
-        Self(vec![value].into())
+        Self([value].into())
     }
 }
 
@@ -50,6 +50,13 @@ impl From<Vec<usize>> for Shape {
     #[inline]
     fn from(value: Vec<usize>) -> Self {
         Self(value.into())
+    }
+}
+
+impl AsRef<Shape> for Shape {
+    #[inline]
+    fn as_ref(&self) -> &Shape {
+        self
     }
 }
 
@@ -193,7 +200,7 @@ pub struct Stride(pub Arc<[usize]>);
 
 impl From<usize> for Stride {
     fn from(value: usize) -> Self {
-        Self(vec![value].into())
+        Self([value].into())
     }
 }
 
@@ -211,6 +218,13 @@ impl From<Vec<usize>> for Stride {
     }
 }
 
+impl AsRef<Stride> for Stride {
+    #[inline]
+    fn as_ref(&self) -> &Stride {
+        self
+    }
+}
+
 impl Stride {
     #[inline]
     pub fn from_slice(slice: &[usize]) -> Self {
@@ -223,6 +237,12 @@ impl Stride {
 #[display("{_0:?}")]
 pub struct Coord(pub Arc<[usize]>);
 
+impl From<usize> for Coord {
+    fn from(value: usize) -> Self {
+        Self([value].into())
+    }
+}
+
 impl<const N: usize> From<[usize; N]> for Coord {
     #[inline]
     fn from(value: [usize; N]) -> Self {
@@ -234,6 +254,13 @@ impl From<Vec<usize>> for Coord {
     #[inline]
     fn from(value: Vec<usize>) -> Self {
         Self(value.into())
+    }
+}
+
+impl AsRef<Coord> for Coord {
+    #[inline]
+    fn as_ref(&self) -> &Coord {
+        self
     }
 }
 
@@ -257,6 +284,13 @@ impl From<Vec<(usize, usize)>> for Layout {
     #[inline]
     fn from(value: Vec<(usize, usize)>) -> Self {
         Self(value.into())
+    }
+}
+
+impl AsRef<Layout> for Layout {
+    #[inline]
+    fn as_ref(&self) -> &Layout {
+        self
     }
 }
 
@@ -405,9 +439,9 @@ impl Layout {
     /// Returns `true` if two layouts are totally equal as index mappings.
     /// Note that this check is exponentially slow so only use it in tests.
     #[inline]
-    pub fn check_isomorphic(&self, other: &Layout) -> bool {
-        match self.size() == other.size() {
-            true => (0..self.size()).all(|index| self.value(index) == other.value(index)),
+    pub fn check_isomorphic(&self, other: impl AsRef<Layout>) -> bool {
+        match self.size() == other.as_ref().size() {
+            true => (0..self.size()).all(|index| self.value(index) == other.as_ref().value(index)),
             false => false,
         }
     }
@@ -514,8 +548,8 @@ impl Layout {
 
     /// Stack another layout onto `self`.
     #[inline]
-    fn concat(&self, other: &Self) -> Self {
-        Self::from([&self[..], &other[..]].concat())
+    fn concat(&self, other: impl AsRef<Self>) -> Self {
+        Self::from([&self[..], &other.as_ref()[..]].concat())
     }
 
     /// Make a tiler from this layout.
@@ -534,8 +568,9 @@ impl Layout {
     ///
     /// `A ⊘ B := A ∘ (B, B∗)`.
     #[inline]
-    pub fn div(&self, tile: &Self) -> Result<Self, LayoutError> {
-        tile.concat(&tile.complement(self.size())?).compose(self)
+    pub fn div(&self, tile: impl AsRef<Self>) -> Result<Self, LayoutError> {
+        let tile = tile.as_ref();
+        tile.concat(tile.complement(self.size())?).compose(self)
     }
 
     /// Shortcut for calling [`Self::div`] on `self.tiler(tile)`.
@@ -544,46 +579,29 @@ impl Layout {
         &self,
         tile: impl IntoIterator<Item = (usize, usize)>,
     ) -> Result<Self, LayoutError> {
-        self.div(&self.tiler(tile))
+        self.div(self.tiler(tile))
     }
 
     /// [Tile product](https://github.com/NVIDIA/cutlass/blob/main/media/docs/cute/02_layout_algebra.md#product-tiling).
     ///
     /// `A ⊗ B := (A, A∗ ∘ B)`.
     #[inline]
-    pub fn prod(&self, tile: &Self) -> Result<Self, LayoutError> {
+    pub fn prod(&self, tile: impl AsRef<Self>) -> Result<Self, LayoutError> {
+        let tile = tile.as_ref();
         let size = self.size() * tile.full_size();
-        Ok(self.concat(&tile.compose(self.complement(size)?)?))
+        Ok(self.concat(tile.compose(self.complement(size)?)?))
     }
 }
 
-impl IndexFn<&Coord> for Layout {
+impl<T: AsRef<Coord>> IndexFn<T> for Layout {
     type Output = usize;
 
     #[inline]
-    fn value(&self, index: &Coord) -> usize {
+    fn value(&self, index: T) -> usize {
         self.iter()
-            .zip_eq(index.iter())
+            .zip_eq(index.as_ref().iter())
             .map(|(&(_, d), &x)| d * x)
             .sum()
-    }
-}
-
-impl IndexFn<&mut Coord> for Layout {
-    type Output = usize;
-
-    #[inline]
-    fn value(&self, index: &mut Coord) -> Self::Output {
-        self.value(index as &Coord)
-    }
-}
-
-impl IndexFn<Coord> for Layout {
-    type Output = usize;
-
-    #[inline]
-    fn value(&self, index: Coord) -> usize {
-        self.value(&index)
     }
 }
 
@@ -606,10 +624,11 @@ impl IndexFn<usize> for Layout {
     }
 }
 
-impl Compose<&Layout> for (usize, usize) {
+impl<T: AsRef<Layout>> Compose<T> for (usize, usize) {
     type Output = Result<Layout, LayoutError>;
 
-    fn compose(&self, f: &Layout) -> Self::Output {
+    fn compose(&self, f: T) -> Self::Output {
+        let f = f.as_ref();
         let &(n, r) = self;
         match n {
             0 | 1 => Ok(Layout::from_shape_stride(n, r)),
@@ -638,55 +657,22 @@ impl Compose<&Layout> for (usize, usize) {
     }
 }
 
-impl Compose<&mut Layout> for (usize, usize) {
-    type Output = Result<Layout, LayoutError>;
-
-    #[inline]
-    fn compose(&self, f: &mut Layout) -> Self::Output {
-        self.compose(f as &Layout)
-    }
-}
-
-impl Compose<Layout> for (usize, usize) {
-    type Output = Result<Layout, LayoutError>;
-
-    #[inline]
-    fn compose(&self, f: Layout) -> Self::Output {
-        self.compose(&f)
-    }
-}
-
-impl Compose<&Layout> for Layout {
+impl<T: AsRef<Layout>> Compose<T> for Layout {
     type Output = Result<Self, LayoutError>;
 
     /// Layout composition. `a.compose(b)` corresponds to `B ∘ A` in layout algebra.
-    fn compose(&self, f: &Layout) -> Self::Output {
+    fn compose(&self, f: T) -> Self::Output {
         if !self.check_disjoint() {
             return Err(LayoutError::Disjoint(self.clone()));
         }
-        let modes: Vec<_> = self.iter().map(|&mode| mode.compose(f)).try_collect()?;
+        let modes: Vec<_> = self
+            .iter()
+            .map(|&mode| mode.compose(f.as_ref()))
+            .try_collect()?;
         let layout = modes
             .into_iter()
             .fold(Layout::default(), |acc, x| acc.concat(&x));
         Ok(layout)
-    }
-}
-
-impl Compose<&mut Layout> for Layout {
-    type Output = Result<Layout, LayoutError>;
-
-    #[inline]
-    fn compose(&self, f: &mut Layout) -> Self::Output {
-        self.compose(f as &Layout)
-    }
-}
-
-impl Compose<Layout> for Layout {
-    type Output = Result<Self, LayoutError>;
-
-    #[inline]
-    fn compose(&self, f: Layout) -> Self::Output {
-        self.compose(&f)
     }
 }
 
@@ -719,24 +705,6 @@ impl Compose<Swizzle> for Layout {
     }
 }
 
-impl Compose<&Swizzle> for Layout {
-    type Output = ComposedFn<Layout, Swizzle>;
-
-    #[inline]
-    fn compose(&self, f: &Swizzle) -> Self::Output {
-        ComposedFn(self.clone(), *f)
-    }
-}
-
-impl Compose<&mut Swizzle> for Layout {
-    type Output = ComposedFn<Layout, Swizzle>;
-
-    #[inline]
-    fn compose(&self, f: &mut Swizzle) -> Self::Output {
-        ComposedFn(self.clone(), *f)
-    }
-}
-
 /// Composition of 2 (possibly different types of) index functions `t` and `f`, i.e., `f ∘ t`.
 #[derive(Debug, Clone)]
 pub struct ComposedFn<T, F>(pub T, pub F);
@@ -761,7 +729,8 @@ mod tests {
     use super::{Compose, Coord, IndexFn, IntoLayout, Layout, LayoutError, Shape, Swizzle};
 
     #[allow(unused)]
-    fn print_tensor(data: &[usize], layout: &Layout) {
+    fn print_tensor(data: &[usize], layout: impl AsRef<Layout>) {
+        let layout = layout.as_ref();
         assert_eq!(data.len(), layout.size());
 
         let sketch = (0..layout.size())
@@ -783,7 +752,8 @@ mod tests {
     }
 
     #[allow(unused)]
-    fn print_layout(layout: &Layout) {
+    fn print_layout(layout: impl AsRef<Layout>) {
+        let layout = layout.as_ref();
         let sketch = (0..layout.size())
             .map(|index| layout.value(index))
             .collect_vec();

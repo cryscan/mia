@@ -15,13 +15,7 @@ version = "0.1.0"
 [dependencies]
 bytemuck = { version = "1.21", features = ["extern_crate_alloc"] }
 casey = "0.4.2"
-derive_more = { version = "2.0.1", features = [
-    "deref",
-    "deref_mut",
-    "display",
-    "from",
-    "into",
-] }
+derive_more = { version = "2.0.1", features = ["as_ref", "deref", "deref_mut", "display", "from", "into"] }
 flume = "0.11"
 futures = "0.3"
 gpp = "0.6.2"
