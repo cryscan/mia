@@ -1,8 +1,9 @@
 use bytemuck::{Pod, Zeroable};
+use derive_more::Display;
 use half::f16;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display, Serialize, Deserialize)]
 pub enum DataType {
     F32,
     F16,

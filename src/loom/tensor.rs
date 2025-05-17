@@ -12,11 +12,14 @@ use thiserror::Error;
 use super::{
     device::{Cpu, Device, Gpu},
     layout::Layout,
+    num::DataType,
 };
 use crate::loom::num::Scalar;
 
 #[derive(Debug, Error)]
 pub enum TensorError {
+    #[error("tensor type error: data type {0} mismatches {1}")]
+    Type(DataType, DataType),
     #[error("tensor creation error: layout {0}'s size not match data len {1}")]
     Create(Layout, usize),
     #[error("tensor reshape error: layout {0}'s size not match layout {1}'s")]
@@ -26,53 +29,88 @@ pub enum TensorError {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TensorId;
+struct TensorId;
 
-pub struct Tensor<D: Device, T: Scalar> {
+/// [`TensorUntyped`] is not really untyped, but a tensor that is not statically typed.
+pub struct TensorUntyped<D: Device> {
     device: D,
     layout: Layout,
     data: Arc<D::Data>,
     id: uid::Id<TensorId>,
-    phantom: PhantomData<T>,
+    r#type: DataType,
 }
 
-impl<D: Device + Debug, T: Scalar> Debug for Tensor<D, T> {
+impl<D: Device + Debug> Debug for TensorUntyped<D> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Tensor")
+        f.debug_struct("TensorUntyped")
             .field("device", &self.device)
             .field("layout", &self.layout)
             .field("id", &self.id)
+            .field("type", &self.r#type)
             .finish()
     }
 }
 
-impl<D: Device + Clone, T: Scalar> Clone for Tensor<D, T> {
-    fn clone(&self) -> Self {
-        Self {
-            device: self.device.clone(),
-            layout: self.layout.clone(),
-            data: self.data.clone(),
-            id: self.id,
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<D: Device, T: Scalar> PartialEq for Tensor<D, T> {
+impl<D: Device> PartialEq for TensorUntyped<D> {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
 
-impl<D: Device, T: Scalar> Eq for Tensor<D, T> {}
+impl<D: Device> Eq for TensorUntyped<D> {}
 
-impl<D: Device, T: Scalar> Drop for Tensor<D, T> {
+impl<D: Device> Drop for TensorUntyped<D> {
     fn drop(&mut self) {
         match Arc::strong_count(&self.data) {
             0 | 1 => self.device.dealloc(self.data.clone()),
             _ => (),
         }
     }
+}
+
+impl<D: Device + Clone> Clone for TensorUntyped<D> {
+    fn clone(&self) -> Self {
+        Self {
+            device: self.device.clone(),
+            layout: self.layout.clone(),
+            data: self.data.clone(),
+            id: self.id,
+            r#type: self.r#type,
+        }
+    }
+}
+
+impl<D: Device> TensorUntyped<D> {
+    #[inline]
+    pub fn layout(&self) -> Layout {
+        self.layout.clone()
+    }
+
+    #[inline]
+    pub fn data_type(&self) -> DataType {
+        self.r#type
+    }
+
+    /// Converts the untyped type to a typed one. Returns error if type mismatches.
+    #[inline]
+    pub fn try_into_typed<T: Scalar>(self) -> Result<Tensor<D, T>, TensorError> {
+        if self.r#type != T::DATA_TYPE {
+            return Err(TensorError::Type(self.r#type, T::DATA_TYPE));
+        }
+        Ok(Tensor {
+            tensor: self,
+            phantom: PhantomData,
+        })
+    }
+}
+
+/// A statically typed tensor. Fits into typed APIs.
+#[derive(Debug, Clone, PartialEq, Eq, Deref, DerefMut)]
+pub struct Tensor<D: Device, T: Scalar> {
+    #[deref]
+    #[deref_mut]
+    tensor: TensorUntyped<D>,
+    phantom: PhantomData<T>,
 }
 
 impl<T: Scalar> Tensor<Cpu, T> {
@@ -100,14 +138,16 @@ impl<T: Scalar> TensorInit<Cpu, T> for Tensor<Cpu, T> {
     async fn zeros(device: Cpu, layout: Layout) -> Self {
         let data = device.alloc::<T>(layout.size(), ()).await;
         let id = uid::Id::new();
+        let r#type = T::DATA_TYPE;
         let phantom = PhantomData;
-        Self {
+        let tensor = TensorUntyped {
             device,
             layout,
             data,
             id,
-            phantom,
-        }
+            r#type,
+        };
+        Self { tensor, phantom }
     }
 
     async fn create(device: Cpu, layout: Layout, data: &[T]) -> Result<Self, TensorError> {
@@ -116,14 +156,16 @@ impl<T: Scalar> TensorInit<Cpu, T> for Tensor<Cpu, T> {
         }
         let data = device.create(data, ()).await;
         let id = uid::Id::new();
+        let r#type = T::DATA_TYPE;
         let phantom = PhantomData;
-        Ok(Self {
+        let tensor = TensorUntyped {
             device,
             layout,
             data,
             id,
-            phantom,
-        })
+            r#type,
+        };
+        Ok(Self { tensor, phantom })
     }
 }
 
@@ -131,14 +173,16 @@ impl<T: Scalar> TensorInit<Gpu, T> for Tensor<Gpu, T> {
     async fn zeros(device: Gpu, layout: Layout) -> Self {
         let data = device.alloc::<T>(layout.size(), Self::PARAMS).await;
         let id = uid::Id::new();
+        let r#type = T::DATA_TYPE;
         let phantom = PhantomData;
-        Self {
+        let tensor = TensorUntyped {
             device,
             layout,
             data,
             id,
-            phantom,
-        }
+            r#type,
+        };
+        Self { tensor, phantom }
     }
 
     async fn create(device: Gpu, layout: Layout, data: &[T]) -> Result<Self, TensorError> {
@@ -147,14 +191,16 @@ impl<T: Scalar> TensorInit<Gpu, T> for Tensor<Gpu, T> {
         }
         let data = device.create(data, Self::PARAMS).await;
         let id = uid::Id::new();
+        let r#type = T::DATA_TYPE;
         let phantom = PhantomData;
-        Ok(Self {
+        let tensor = TensorUntyped {
             device,
             layout,
             data,
             id,
-            phantom,
-        })
+            r#type,
+        };
+        Ok(Self { tensor, phantom })
     }
 }
 
@@ -177,14 +223,16 @@ impl<T: Scalar> TensorTo<Gpu, T> for Tensor<Cpu, T> {
         let data = device.create(self.data(), Tensor::<Gpu, T>::PARAMS).await;
         let layout = self.layout.clone();
         let id = uid::Id::new();
+        let r#type = T::DATA_TYPE;
         let phantom = PhantomData;
-        Tensor {
+        let tensor = TensorUntyped {
             device,
             layout,
             data,
             id,
-            phantom,
-        }
+            r#type,
+        };
+        Tensor { tensor, phantom }
     }
 }
 
@@ -194,14 +242,16 @@ impl<T: Scalar> TensorTo<Cpu, T> for Tensor<Gpu, T> {
         let data = self.device.read(&self.data).await.into();
         let layout = self.layout.clone();
         let id = uid::Id::new();
+        let r#type = T::DATA_TYPE;
         let phantom = PhantomData;
-        Tensor {
+        let tensor = TensorUntyped {
             device,
             layout,
             data,
             id,
-            phantom,
-        }
+            r#type,
+        };
+        Tensor { tensor, phantom }
     }
 }
 
@@ -217,9 +267,10 @@ impl<T: Scalar> TensorTo<Gpu, T> for Tensor<Gpu, T> {
 }
 
 impl<D: Device, T: Scalar> Tensor<D, T> {
+    /// Transform the tensor into an untyped one.
     #[inline]
-    pub fn layout(&self) -> Layout {
-        self.layout.clone()
+    pub fn into_untyped(self) -> TensorUntyped<D> {
+        self.tensor
     }
 
     /// Reshape the tensor, leaving the underlying data untouched.
@@ -334,9 +385,10 @@ impl Slice {
     }
 }
 
-#[derive(Debug, Clone, Deref, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deref, DerefMut)]
 pub struct TensorSlice<D: Device, T: Scalar> {
     #[deref]
+    #[deref_mut]
     tensor: Tensor<D, T>,
     slice: Slice,
 }
