@@ -13,7 +13,7 @@ use super::{
     device::{Cpu, Device, Gpu},
     layout::Layout,
 };
-use crate::{future::Future, num::Scalar};
+use crate::loom::num::Scalar;
 
 #[derive(Debug, Error)]
 pub enum TensorError {
@@ -88,11 +88,12 @@ impl<T: Scalar> Tensor<Gpu, T> {
         .union(wgpu::BufferUsages::COPY_SRC);
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), trait_variant::make(Send))]
 pub trait TensorInit<D: Device, T: Scalar>: Sized {
     /// Init a tensor of zeros.
-    fn zeros(device: D, layout: Layout) -> impl Future<Self>;
+    async fn zeros(device: D, layout: Layout) -> Self;
     /// Create a tensor from data.
-    fn create(device: D, layout: Layout, data: &[T]) -> impl Future<Result<Self, TensorError>>;
+    async fn create(device: D, layout: Layout, data: &[T]) -> Result<Self, TensorError>;
 }
 
 impl<T: Scalar> TensorInit<Cpu, T> for Tensor<Cpu, T> {
@@ -157,9 +158,10 @@ impl<T: Scalar> TensorInit<Gpu, T> for Tensor<Gpu, T> {
     }
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), trait_variant::make(Send))]
 pub trait TensorTo<D: Device, T: Scalar> {
     /// Send a tensor to another device.
-    fn to(self, device: D) -> impl Future<Tensor<D, T>>;
+    async fn to(self, device: D) -> Tensor<D, T>;
 }
 
 impl<T: Scalar> TensorTo<Cpu, T> for Tensor<Cpu, T> {

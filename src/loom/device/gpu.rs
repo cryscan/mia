@@ -5,7 +5,7 @@ use thiserror::Error;
 use wgpu::util::DeviceExt;
 
 use super::{Cpu, Device, DeviceId};
-use crate::num::Scalar;
+use crate::loom::num::Scalar;
 
 /// A WebGPU device.
 #[allow(unused)]
