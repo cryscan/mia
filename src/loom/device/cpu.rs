@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::{Device, DeviceId};
-use crate::num::Scalar;
+use crate::loom::num::Scalar;
 
 /// A CPU device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
