@@ -6,4 +6,5 @@ pub mod device;
 pub mod layout;
 pub mod num;
 pub mod ops;
+pub mod slice;
 pub mod tensor;
