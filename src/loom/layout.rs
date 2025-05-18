@@ -298,6 +298,13 @@ pub trait IntoLayout {
     fn into_layout(self) -> Layout;
 }
 
+impl IntoLayout for Layout {
+    #[inline]
+    fn into_layout(self) -> Layout {
+        self
+    }
+}
+
 impl<S, D> IntoLayout for (S, D)
 where
     S: Into<Shape>,
