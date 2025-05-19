@@ -26,7 +26,7 @@ pub enum TensorError {
 struct TensorId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TensorUntyped<D: Device> {
+pub struct TensorUntyped<D> {
     device: Arc<D>,
     layout: Layout,
     r#type: DataType,
@@ -62,9 +62,16 @@ impl<D: Device> TensorUntyped<D> {
     }
 }
 
+impl<D: Device + Clone> TensorUntyped<D> {
+    #[inline]
+    pub fn device(&self) -> D {
+        self.device.as_ref().clone()
+    }
+}
+
 /// A statically typed tensor. Good to fit into typed APIs.
 #[derive(Debug, Clone, PartialEq, Eq, Deref, DerefMut)]
-pub struct Tensor<D: Device, T: Scalar> {
+pub struct Tensor<D, T> {
     #[deref]
     #[deref_mut]
     tensor: TensorUntyped<D>,
@@ -78,10 +85,22 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
         self.tensor
     }
 
+    /// Reshape the tensor, leaving the underlying data untouched.
+    #[inline]
+    pub fn reshape(mut self, layout: Layout) -> Result<Self, TensorError> {
+        if self.layout.size() != layout.size() {
+            return Err(TensorError::Reshape(self.layout(), layout));
+        }
+        self.layout = layout;
+        Ok(self)
+    }
+}
+
+impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
     /// Create a tensor of zeros.
     #[inline]
-    pub fn zeros(device: D, layout: impl IntoLayout) -> Self {
-        let device = Arc::new(device);
+    pub fn zeros(device: &D, layout: impl IntoLayout) -> Self {
+        let device = Arc::new(device.clone());
         let layout = layout.into_layout();
         let r#type = T::DATA_TYPE;
         let id = uid::Id::new();
@@ -95,14 +114,20 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
         Self { tensor, phantom }
     }
 
-    /// Reshape the tensor, leaving the underlying data untouched.
+    /// Create a tensor of zeros from current device and layout.
     #[inline]
-    pub fn reshape(mut self, layout: Layout) -> Result<Self, TensorError> {
-        if self.layout.size() != layout.size() {
-            return Err(TensorError::Reshape(self.layout(), layout));
-        }
-        self.layout = layout;
-        self.id = uid::Id::new();
-        Ok(self)
+    pub fn zeros_like(&self) -> Self {
+        let device = self.device().into();
+        let layout = self.layout();
+        let id = uid::Id::new();
+        let r#type = self.r#type;
+        let tensor = TensorUntyped {
+            device,
+            layout,
+            r#type,
+            id,
+        };
+        let phantom = PhantomData;
+        Self { tensor, phantom }
     }
 }
