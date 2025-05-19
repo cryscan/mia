@@ -42,6 +42,7 @@ tracing = { version = "0.1.40", optional = true }
 tracing-subscriber = { version = "0.3.18", optional = true }
 tracing-tracy = { version = "0.11.4", optional = true }
 trait-variant = "0.1.2"
+u4 = { version = "0.1.2", features = ["serde"] }
 uid = "0.1"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
