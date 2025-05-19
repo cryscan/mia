@@ -20,7 +20,7 @@ pub enum TensorError {
     #[error("tensor reshape error: layout {0}'s size not match layout {1}'s")]
     Reshape(Layout, Layout),
     #[error("tensor cast error: data size before casting ({0}) not match that after ({1})")]
-    Transmute(usize, usize),
+    Cast(usize, usize),
     #[error("tensor slice error: slice {1} is not compatible with layout {0}")]
     Slice(Layout, Slice),
 }
@@ -50,6 +50,11 @@ impl<D: Device> TensorUntyped<D> {
     #[inline]
     pub fn data_count(&self) -> usize {
         self.layout.size() * self.r#type.count()
+    }
+
+    #[inline]
+    pub fn data_size(&self) -> usize {
+        self.layout.size() * self.r#type.size()
     }
 
     #[inline]
@@ -121,14 +126,11 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
 
     /// Re-interpret the tensor as another type, leaving the underlying data untouched.
     #[inline]
-    pub fn transmute<U: Scalar>(
-        self,
-        layout: impl IntoLayout,
-    ) -> Result<Tensor<D, U>, TensorError> {
+    pub fn cast<U: Scalar>(self, layout: impl IntoLayout) -> Result<Tensor<D, U>, TensorError> {
         let layout = layout.into_layout();
         let size = layout.size() * U::DATA_TYPE.count();
         if self.data_size() != size {
-            return Err(TensorError::Transmute(self.data_size(), size));
+            return Err(TensorError::Cast(self.data_size(), size));
         }
         let TensorUntyped { device, id, .. } = self.tensor;
         let r#type = U::DATA_TYPE;

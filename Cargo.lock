@@ -181,6 +181,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "const-default"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b396d1f76d455557e1218ec8066ae14bba60b4b36ecd55577ba979f5db7ecaa"
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -755,6 +761,7 @@ dependencies = [
  "tracing-subscriber",
  "tracing-tracy",
  "trait-variant",
+ "u4",
  "uid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -1413,6 +1420,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "u4"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "390884f06a6f4eee34a2082a3eb17844cf3605a69f033f79bf0e6f460279112c"
+dependencies = [
+ "const-default",
+ "serde",
 ]
 
 [[package]]
