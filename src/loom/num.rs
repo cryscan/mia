@@ -12,23 +12,54 @@ pub enum DataType {
     U32,
     PackedU4x8,
     PackedU8x4,
+    PackedF32x4,
+    PackedF16x4,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+impl DataType {
+    /// Returns number of element packed in this data type.
+    pub const fn count(self) -> usize {
+        match self {
+            DataType::F32 => 1,
+            DataType::F16 => 1,
+            DataType::U8 => 1,
+            DataType::U16 => 1,
+            DataType::U32 => 1,
+            DataType::PackedU4x8 => 8,
+            DataType::PackedU8x4 => 4,
+            DataType::PackedF32x4 => 4,
+            DataType::PackedF16x4 => 4,
+        }
+    }
+}
+
+macro_rules! impl_bytemuck {
+    ($ty:ty) => {
+        unsafe impl ::bytemuck::Zeroable for $ty {}
+        unsafe impl ::bytemuck::Pod for $ty {}
+    };
+}
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 #[repr(C)]
 pub struct PackedU4x8(pub u32);
 
-unsafe impl Zeroable for PackedU4x8 {}
-
-unsafe impl Pod for PackedU4x8 {}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 #[repr(C)]
 pub struct PackedU8x4(pub u32);
 
-unsafe impl Zeroable for PackedU8x4 {}
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
+#[repr(C)]
+pub struct PackedF32x4(pub [f32; 4]);
 
-unsafe impl Pod for PackedU8x4 {}
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
+#[repr(C)]
+pub struct PackedF16x4(pub [f16; 4]);
+
+impl_bytemuck!(PackedU4x8);
+impl_bytemuck!(PackedU8x4);
+impl_bytemuck!(PackedF32x4);
+impl_bytemuck!(PackedF16x4);
 
 pub trait Zero {
     fn zero() -> Self;
@@ -73,6 +104,18 @@ impl Zero for PackedU4x8 {
 impl Zero for PackedU8x4 {
     fn zero() -> Self {
         Self(0)
+    }
+}
+
+impl Zero for PackedF32x4 {
+    fn zero() -> Self {
+        Self([0.0; 4])
+    }
+}
+
+impl Zero for PackedF16x4 {
+    fn zero() -> Self {
+        Self([f16::ZERO; 4])
     }
 }
 
@@ -122,11 +165,24 @@ impl One for PackedU8x4 {
     }
 }
 
-pub trait Scalar: Sized + Pod + Zero + Send + Sync {
+impl One for PackedF32x4 {
+    fn one() -> Self {
+        Self([1.0; 4])
+    }
+}
+
+impl One for PackedF16x4 {
+    fn one() -> Self {
+        Self([f16::ONE; 4])
+    }
+}
+
+pub trait Scalar: Sized + Zeroable + Pod + Zero + One + Send + Sync {
     const DATA_TYPE: DataType;
 }
 
 pub trait Float: Scalar {}
+pub trait PackedFloat4: Scalar {}
 
 impl Scalar for f32 {
     const DATA_TYPE: DataType = DataType::F32;
@@ -156,5 +212,16 @@ impl Scalar for PackedU8x4 {
     const DATA_TYPE: DataType = DataType::PackedU8x4;
 }
 
+impl Scalar for PackedF32x4 {
+    const DATA_TYPE: DataType = DataType::PackedF32x4;
+}
+
+impl Scalar for PackedF16x4 {
+    const DATA_TYPE: DataType = DataType::PackedF16x4;
+}
+
 impl Float for f32 {}
 impl Float for f16 {}
+
+impl PackedFloat4 for PackedF32x4 {}
+impl PackedFloat4 for PackedF16x4 {}

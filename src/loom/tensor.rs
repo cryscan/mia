@@ -19,6 +19,8 @@ pub enum TensorError {
     Create(Layout, usize),
     #[error("tensor reshape error: layout {0}'s size not match layout {1}'s")]
     Reshape(Layout, Layout),
+    #[error("tensor cast error: data size before casting ({0}) not match that after ({1})")]
+    Transmute(usize, usize),
     #[error("tensor slice error: slice {1} is not compatible with layout {0}")]
     Slice(Layout, Slice),
 }
@@ -43,6 +45,11 @@ impl<D: Device> TensorUntyped<D> {
     #[inline]
     pub fn data_type(&self) -> DataType {
         self.r#type
+    }
+
+    #[inline]
+    pub fn data_count(&self) -> usize {
+        self.layout.size() * self.r#type.count()
     }
 
     #[inline]
@@ -91,14 +98,48 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
         self.tensor
     }
 
+    #[inline]
+    pub fn data_count(&self) -> usize {
+        self.layout.size() * T::DATA_TYPE.count()
+    }
+
+    #[inline]
+    pub fn data_size(&self) -> usize {
+        self.layout.size() * size_of::<T>()
+    }
+
     /// Reshape the tensor, leaving the underlying data untouched.
     #[inline]
-    pub fn reshape(mut self, layout: Layout) -> Result<Self, TensorError> {
+    pub fn reshape(mut self, layout: impl IntoLayout) -> Result<Self, TensorError> {
+        let layout = layout.into_layout();
         if self.layout.size() != layout.size() {
             return Err(TensorError::Reshape(self.layout(), layout));
         }
         self.layout = layout;
         Ok(self)
+    }
+
+    /// Re-interpret the tensor as another type, leaving the underlying data untouched.
+    #[inline]
+    pub fn transmute<U: Scalar>(
+        self,
+        layout: impl IntoLayout,
+    ) -> Result<Tensor<D, U>, TensorError> {
+        let layout = layout.into_layout();
+        let size = layout.size() * U::DATA_TYPE.count();
+        if self.data_size() != size {
+            return Err(TensorError::Transmute(self.data_size(), size));
+        }
+        let TensorUntyped { device, id, .. } = self.tensor;
+        let r#type = U::DATA_TYPE;
+        let tensor = TensorUntyped {
+            device,
+            layout,
+            r#type,
+            id,
+        };
+        let phantom = PhantomData;
+        Ok(Tensor { tensor, phantom })
     }
 }
 

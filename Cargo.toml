@@ -24,6 +24,7 @@ derive_more = { version = "2.0.1", features = [
 ] }
 flume = "0.11"
 futures = "0.3"
+glam = { version = "0.30.3", features = ["bytemuck", "serde"] }
 gpp = "0.6.2"
 half = { version = "2.2", features = ["bytemuck", "serde"] }
 instant = { version = "0.1", features = ["inaccurate", "wasm-bindgen"] }
