@@ -91,7 +91,7 @@ impl Slice {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deref, DerefMut)]
-pub struct TensorSlice<D: Device, T: Scalar> {
+pub struct TensorSlice<D, T> {
     #[deref]
     #[deref_mut]
     tensor: Tensor<D, T>,
