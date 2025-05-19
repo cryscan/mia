@@ -1,7 +1,12 @@
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 
-use super::{device::Device, layout::Layout, num::DataType, tensor::TensorUntyped};
+use super::{
+    device::Device,
+    layout::Layout,
+    num::{DataType, Scalar},
+    tensor::Tensor,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Display, Serialize, Deserialize)]
 pub enum Access {
@@ -18,11 +23,11 @@ pub struct TensorIr {
     pub access: Access,
 }
 
-impl<D: Device> TensorUntyped<D> {
+impl<D: Device, T: Scalar> Tensor<D, T> {
     #[inline]
     pub fn ir(&self, access: Access) -> TensorIr {
         let layout = self.layout();
-        let r#type = self.data_type();
+        let r#type = T::DATA_TYPE;
         let id = self.id().get();
         TensorIr {
             layout,
@@ -38,6 +43,8 @@ pub trait TensorOp: Send + Sync {
     fn io(&self) -> (Vec<&TensorIr>, Vec<&TensorIr>);
     /// Input and output tensors (mutable).
     fn io_mut(&mut self) -> (Vec<&mut TensorIr>, Vec<&mut TensorIr>);
+    /// Emit commands that execute this op.
+    fn compile(&self, device: &dyn Device);
 }
 
 /// Set the tensors that would be written to as [`Access::ReadWrite`].
