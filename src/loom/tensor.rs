@@ -180,10 +180,3 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
         Self { tensor, phantom }
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TensorIr {
-    pub layout: Layout,
-    pub r#type: DataType,
-    pub id: usize,
-}
