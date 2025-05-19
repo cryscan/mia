@@ -7,6 +7,7 @@ use super::{device::Device, layout::Layout, num::DataType, tensor::TensorUntyped
 pub enum Access {
     ReadOnly,
     ReadWrite,
+    WriteOnly,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -15,14 +16,6 @@ pub struct TensorIr {
     pub r#type: DataType,
     pub id: usize,
     pub access: Access,
-}
-
-impl TensorIr {
-    /// Override the access of the IR.
-    #[inline]
-    pub fn update(&mut self, access: Access) {
-        self.access = self.access.max(access);
-    }
 }
 
 impl<D: Device> TensorUntyped<D> {
@@ -41,19 +34,23 @@ impl<D: Device> TensorUntyped<D> {
 }
 
 pub trait TensorOp: Send + Sync {
-    /// Iterates through input and output tensors.
+    /// Input and output tensors.
     fn io(&self) -> (Vec<&TensorIr>, Vec<&TensorIr>);
-    /// Iterates through input and output tensors (mutable).
+    /// Input and output tensors (mutable).
     fn io_mut(&mut self) -> (Vec<&mut TensorIr>, Vec<&mut TensorIr>);
+}
 
-    /// Set the tensors that would be written to as [`Access::ReadWrite`].
-    fn update_io_access(&mut self) {
-        let (mut inputs, outputs) = self.io_mut();
-        for output in outputs {
-            output.update(Access::ReadWrite);
-            if let Some(input) = inputs.iter_mut().find(|input| input.id == output.id) {
-                input.update(Access::ReadWrite);
+/// Set the tensors that would be written to as [`Access::ReadWrite`].
+#[allow(unused)]
+fn update_io_access(op: &mut impl TensorOp) {
+    let (mut inputs, outputs) = op.io_mut();
+    for output in outputs {
+        match inputs.iter_mut().find(|input| input.id == output.id) {
+            Some(input) => {
+                input.access = Access::ReadWrite;
+                output.access = Access::ReadWrite;
             }
+            None => output.access = Access::WriteOnly,
         }
     }
 }
