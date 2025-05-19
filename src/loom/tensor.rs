@@ -1,6 +1,7 @@
 use std::{marker::PhantomData, sync::Arc};
 
 use derive_more::{Deref, DerefMut};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::{
@@ -22,8 +23,8 @@ pub enum TensorError {
     Slice(Layout, Slice),
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-struct TensorId;
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TensorId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TensorUntyped<D> {
@@ -42,6 +43,11 @@ impl<D: Device> TensorUntyped<D> {
     #[inline]
     pub fn data_type(&self) -> DataType {
         self.r#type
+    }
+
+    #[inline]
+    pub fn id(&self) -> uid::Id<TensorId> {
+        self.id
     }
 
     /// Converts the untyped type to a typed one. Returns error if type mismatches.
@@ -130,4 +136,11 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
         let phantom = PhantomData;
         Self { tensor, phantom }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TensorIr {
+    pub layout: Layout,
+    pub r#type: DataType,
+    pub id: usize,
 }
