@@ -62,6 +62,11 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
         self.layout.size() * size_of::<T>()
     }
 
+    #[inline]
+    pub fn ref_count(&self) -> usize {
+        Arc::strong_count(&self.device)
+    }
+
     /// Reshape the tensor, leaving the underlying data untouched.
     #[inline]
     pub fn reshape(mut self, layout: impl IntoLayout) -> Result<Self, TensorError> {
