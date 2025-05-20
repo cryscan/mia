@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +22,7 @@ pub struct TensorIr {
     pub layout: Layout,
     pub r#type: DataType,
     pub id: usize,
+    pub count: usize,
     pub access: Access,
 }
 
@@ -28,36 +31,19 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
     pub fn ir(&self, access: Access) -> TensorIr {
         let layout = self.layout();
         let r#type = T::DATA_TYPE;
+        let count = self.ref_count();
         let id = self.id().get();
         TensorIr {
             layout,
             r#type,
             id,
+            count,
             access,
         }
     }
 }
 
-pub trait TensorOp: Send + Sync {
-    /// Input and output tensors.
-    fn io(&self) -> (Vec<&TensorIr>, Vec<&TensorIr>);
-    /// Input and output tensors (mutable).
-    fn io_mut(&mut self) -> (Vec<&mut TensorIr>, Vec<&mut TensorIr>);
-    /// Emit commands that execute this op.
-    fn compile(&self, device: &dyn Device);
-}
-
-/// Set the tensors that would be written to as [`Access::ReadWrite`].
-#[allow(unused)]
-fn update_io_access(op: &mut impl TensorOp) {
-    let (mut inputs, outputs) = op.io_mut();
-    for output in outputs {
-        match inputs.iter_mut().find(|input| input.id == output.id) {
-            Some(input) => {
-                input.access = Access::ReadWrite;
-                output.access = Access::ReadWrite;
-            }
-            None => output.access = Access::WriteOnly,
-        }
-    }
+pub trait TensorOp: Send + Sync + Any {
+    /// Input and output tensors of the op.
+    fn io(&self) -> Vec<TensorIr>;
 }
