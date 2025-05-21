@@ -1,4 +1,4 @@
-use std::any::Any;
+use std::{any::Any, borrow::Cow};
 
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
@@ -44,6 +44,8 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
 }
 
 pub trait TensorOp: Send + Sync + Any {
+    /// Name of the op.
+    fn name(&self) -> Cow<'static, str>;
     /// Input and output tensors of the op.
     fn io(&self) -> Vec<TensorIr>;
 }

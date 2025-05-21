@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use derive_more::{Deref, DerefMut};
 use rustc_hash::FxHashMap as HashMap;
 
@@ -38,6 +40,13 @@ pub struct AllocatedOp {
 }
 
 impl TensorOp for AllocatedOp {
+    #[inline]
+    fn name(&self) -> Cow<'static, str> {
+        let type_name = std::any::type_name::<Self>();
+        let op_name = self.op.name();
+        Cow::from(format!("{type_name}<{op_name}>"))
+    }
+
     #[inline]
     fn io(&self) -> Vec<TensorIr> {
         self.io.clone()
