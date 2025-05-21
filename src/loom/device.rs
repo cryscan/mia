@@ -1,6 +1,6 @@
-use std::any::{Any, TypeId};
+use std::any::TypeId;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::FxHashMap as HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -9,16 +9,25 @@ use super::ops::TensorOp;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DeviceId;
 
+/// Implemented for each [`Device`] for each [`TensorOp`].
+/// Defines an `op`'s actual execution on the device.
 pub trait DeviceOp<Op: TensorOp> {
     fn execute(&self, op: &Op);
 }
 
-pub trait Device {}
+pub trait Device {
+    fn execute(&self, op: &dyn TensorOp);
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cpu;
 
-impl Device for Cpu {}
+impl Device for Cpu {
+    #[inline]
+    fn execute(&self, _op: &dyn TensorOp) {
+        todo!()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Gpu {
@@ -28,16 +37,27 @@ pub struct Gpu {
     device: wgpu::Device,
     /// The WebGPU command queue.
     queue: wgpu::Queue,
+    /// Operator that the device can execute.
+    ops: HashMap<TypeId, fn(&Self, &dyn TensorOp)>,
 }
 
-impl Device for Gpu {}
+impl Device for Gpu {
+    #[inline]
+    fn execute(&self, op: &dyn TensorOp) {
+        let id = op.type_id();
+        match self.ops.get(&id) {
+            Some(f) => f(self, op),
+            None => log::error!("unable to execute op of type {id:?}"),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct GpuBuilder {
     pub adapter: wgpu::Adapter,
     pub features: wgpu::Features,
     pub limits: wgpu::Limits,
-    pub ops: FxHashMap<TypeId, fn(&Gpu, &dyn Any)>,
+    pub ops: HashMap<TypeId, fn(&Gpu, &dyn TensorOp)>,
 }
 
 #[derive(Debug, Error)]
@@ -66,7 +86,7 @@ impl GpuBuilder {
             adapter,
             features,
             limits,
-            ..
+            ops,
         } = self.clone();
 
         let (device, queue) = adapter
@@ -80,7 +100,12 @@ impl GpuBuilder {
             .await?;
 
         let id = uid::Id::new();
-        let device = Gpu { id, device, queue };
+        let device = Gpu {
+            id,
+            device,
+            queue,
+            ops,
+        };
         Ok(device)
     }
 
@@ -100,7 +125,7 @@ impl GpuBuilder {
         Gpu: DeviceOp<Op>,
     {
         let id = TypeId::of::<Op>();
-        let f = |gpu: &Gpu, op: &dyn Any| match op.downcast_ref::<Op>() {
+        let f = |gpu: &Gpu, op: &dyn TensorOp| match op.downcast_ref::<Op>() {
             Some(op) => <Gpu as DeviceOp<Op>>::execute(gpu, op),
             None => unreachable!(),
         };

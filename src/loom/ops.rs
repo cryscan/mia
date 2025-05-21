@@ -47,3 +47,17 @@ pub trait TensorOp: Send + Sync + Any {
     /// Input and output tensors of the op.
     fn io(&self) -> Vec<TensorIr>;
 }
+
+impl std::ops::Deref for dyn TensorOp {
+    type Target = dyn Any;
+
+    fn deref(&self) -> &Self::Target {
+        self as &dyn Any
+    }
+}
+
+impl std::ops::DerefMut for dyn TensorOp {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self as &mut dyn Any
+    }
+}
