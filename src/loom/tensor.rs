@@ -101,7 +101,7 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
     /// Create a tensor of zeros.
     #[inline]
     pub fn zeros(device: &D, layout: impl IntoLayout) -> Self {
-        let device = Arc::new(device.clone());
+        let device = device.clone().into();
         let layout = layout.into_layout();
         let id = uid::Id::new();
         let phantom = PhantomData;
