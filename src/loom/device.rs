@@ -1,4 +1,7 @@
-use std::any::{Any, TypeId};
+use std::{
+    any::{Any, TypeId},
+    sync::Arc,
+};
 
 use rustc_hash::FxHashMap as HashMap;
 use serde::{Deserialize, Serialize};
@@ -26,7 +29,7 @@ pub struct Cpu {
     /// The unique identifier of the device.
     id: uid::Id<DeviceId>,
     /// Operators that the device is able to execute.
-    ops: OpVTable<Self>,
+    ops: Arc<OpVTable<Self>>,
 }
 
 impl Device for Cpu {
@@ -52,7 +55,7 @@ impl CpuBuilder {
 
     pub fn build(&self) -> Cpu {
         let id = uid::Id::new();
-        let ops = self.ops.clone();
+        let ops = self.ops.clone().into();
         Cpu { id, ops }
     }
 
@@ -80,7 +83,7 @@ pub struct Gpu {
     /// The WebGPU command queue.
     queue: wgpu::Queue,
     /// Operators that the device is able to execute.
-    ops: OpVTable<Self>,
+    ops: Arc<OpVTable<Self>>,
 }
 
 impl Device for Gpu {
@@ -142,6 +145,7 @@ impl GpuBuilder {
             .await?;
 
         let id = uid::Id::new();
+        let ops = ops.into();
         let device = Gpu {
             id,
             device,
