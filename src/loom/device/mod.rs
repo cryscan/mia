@@ -17,12 +17,12 @@ pub struct DeviceId;
 
 /// Implemented for each [`Device`] for each [`TensorOp`].
 pub trait DeviceOp<Op: TensorOp> {
-    /// Statically dispatch to actual `op`'s execution, given arguments `io`.
+    /// Statically dispatch to actual `op`'s execution, using given `io`.
     fn execute(&self, op: Op, io: Vec<TensorIr>);
 }
 
 pub trait Device {
-    /// Dynamically dispatch to actual `op`'s execution, given arguments `io`.
+    /// Dynamically dispatch to actual `op`'s execution, using given `io`.
     fn execute_dyn(&self, op: Box<dyn TensorOp>, io: Vec<TensorIr>);
 
     /// Dynamically dispatch to actual `op`'s execution, using `op`'s own `io`.
@@ -58,7 +58,7 @@ mod tests {
 
         impl<const N: usize> DeviceOp<PhonyOp<N>> for Cpu {
             fn execute(&self, op: PhonyOp<N>, _io: Vec<TensorIr>) {
-                println!("execute op: {}", op.name());
+                println!("{}", op.name());
             }
         }
 

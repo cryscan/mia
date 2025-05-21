@@ -24,15 +24,17 @@ pub enum TensorError {
     Slice(Layout, Slice),
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TensorId;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+#[repr(transparent)]
+pub struct TensorId(uuid::Uuid);
 
 /// A statically typed tensor. Good to fit into typed APIs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tensor<D, T> {
     device: Arc<D>,
     layout: Layout,
-    id: uid::Id<TensorId>,
+    id: TensorId,
     phantom: PhantomData<T>,
 }
 
@@ -48,7 +50,7 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
     }
 
     #[inline]
-    pub fn id(&self) -> uid::Id<TensorId> {
+    pub fn id(&self) -> TensorId {
         self.id
     }
 
@@ -103,7 +105,7 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
     pub fn zeros(device: &D, layout: impl IntoLayout) -> Self {
         let device = device.clone().into();
         let layout = layout.into_layout();
-        let id = uid::Id::new();
+        let id = TensorId(uuid::Uuid::new_v4());
         let phantom = PhantomData;
         Self {
             device,
@@ -118,7 +120,7 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
     pub fn zeros_like(&self) -> Self {
         let device = self.device.as_ref().clone().into();
         let layout = self.layout();
-        let id = uid::Id::new();
+        let id = TensorId(uuid::Uuid::new_v4());
         let phantom = PhantomData;
         Self {
             device,
