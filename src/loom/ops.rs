@@ -61,3 +61,10 @@ impl std::ops::DerefMut for dyn TensorOp {
         self as &mut dyn Any
     }
 }
+
+impl From<Box<dyn TensorOp>> for Box<dyn Any> {
+    fn from(value: Box<dyn TensorOp>) -> Self {
+        let value = Box::leak(value);
+        unsafe { Box::from_raw(value as *mut dyn Any) }
+    }
+}
