@@ -1,4 +1,4 @@
-use std::any::TypeId;
+use std::any::{Any, TypeId};
 
 use rustc_hash::FxHashMap as HashMap;
 use serde::{Deserialize, Serialize};
@@ -12,25 +12,27 @@ pub struct DeviceId;
 /// Implemented for each [`Device`] for each [`TensorOp`].
 /// Defines an `op`'s actual execution on the device.
 pub trait DeviceOp<Op: TensorOp> {
-    fn execute(&self, op: &Op);
+    fn execute(&self, op: Op);
 }
 
 pub trait Device {
-    fn execute_dyn(&self, op: &dyn TensorOp);
+    fn execute_dyn(&self, op: Box<dyn TensorOp>);
 }
+
+type OpVTable<D> = HashMap<TypeId, fn(&D, Box<dyn TensorOp>)>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cpu {
     /// The unique identifier of the device.
     id: uid::Id<DeviceId>,
-    /// Operator that the device can execute.
-    ops: HashMap<TypeId, fn(&Self, &dyn TensorOp)>,
+    /// Operators that the device is able to execute.
+    ops: OpVTable<Self>,
 }
 
 impl Device for Cpu {
     #[inline]
-    fn execute_dyn(&self, op: &dyn TensorOp) {
-        let id = op.type_id();
+    fn execute_dyn(&self, op: Box<dyn TensorOp>) {
+        let id = op.as_ref().type_id();
         match self.ops.get(&id) {
             Some(f) => f(self, op),
             None => log::error!("unable to execute op of type {id:?}"),
@@ -40,7 +42,7 @@ impl Device for Cpu {
 
 #[derive(Debug, Default, Clone)]
 pub struct CpuBuilder {
-    pub ops: HashMap<TypeId, fn(&Cpu, &dyn TensorOp)>,
+    pub ops: OpVTable<Cpu>,
 }
 
 impl CpuBuilder {
@@ -60,9 +62,9 @@ impl CpuBuilder {
         Cpu: DeviceOp<Op>,
     {
         let id = TypeId::of::<Op>();
-        let f = |cpu: &Cpu, op: &dyn TensorOp| match op.downcast_ref::<Op>() {
-            Some(op) => <Cpu as DeviceOp<Op>>::execute(cpu, op),
-            None => unreachable!(),
+        let f = |cpu: &Cpu, op: Box<dyn TensorOp>| match Box::<dyn Any>::from(op).downcast() {
+            Ok(op) => cpu.execute(*op),
+            Err(_) => unreachable!(),
         };
         self.ops.insert(id, f);
         self
@@ -77,14 +79,14 @@ pub struct Gpu {
     device: wgpu::Device,
     /// The WebGPU command queue.
     queue: wgpu::Queue,
-    /// Operator that the device can execute.
-    ops: HashMap<TypeId, fn(&Self, &dyn TensorOp)>,
+    /// Operators that the device is able to execute.
+    ops: OpVTable<Self>,
 }
 
 impl Device for Gpu {
     #[inline]
-    fn execute_dyn(&self, op: &dyn TensorOp) {
-        let id = op.type_id();
+    fn execute_dyn(&self, op: Box<dyn TensorOp>) {
+        let id = op.as_ref().type_id();
         match self.ops.get(&id) {
             Some(f) => f(self, op),
             None => log::error!("unable to execute op of type {id:?}"),
@@ -97,7 +99,7 @@ pub struct GpuBuilder {
     pub adapter: wgpu::Adapter,
     pub features: wgpu::Features,
     pub limits: wgpu::Limits,
-    pub ops: HashMap<TypeId, fn(&Gpu, &dyn TensorOp)>,
+    pub ops: OpVTable<Gpu>,
 }
 
 #[derive(Debug, Error)]
@@ -165,9 +167,9 @@ impl GpuBuilder {
         Gpu: DeviceOp<Op>,
     {
         let id = TypeId::of::<Op>();
-        let f = |gpu: &Gpu, op: &dyn TensorOp| match op.downcast_ref::<Op>() {
-            Some(op) => <Gpu as DeviceOp<Op>>::execute(gpu, op),
-            None => unreachable!(),
+        let f = |gpu: &Gpu, op: Box<dyn TensorOp>| match Box::<dyn Any>::from(op).downcast() {
+            Ok(op) => gpu.execute(*op),
+            Err(_) => unreachable!(),
         };
         self.ops.insert(id, f);
         self
@@ -181,7 +183,6 @@ mod tests {
 
     #[test]
     fn test_add_op() {
-        #[derive(Debug)]
         struct PhonyOp<const N: usize>;
 
         impl<const N: usize> TensorOp for PhonyOp<N> {
@@ -191,7 +192,7 @@ mod tests {
         }
 
         impl<const N: usize> DeviceOp<PhonyOp<N>> for Cpu {
-            fn execute(&self, _op: &PhonyOp<N>) {
+            fn execute(&self, _op: PhonyOp<N>) {
                 println!("execute phony op: {N}");
             }
         }
@@ -208,6 +209,6 @@ mod tests {
             Box::new(PhonyOp::<1>),
             Box::new(PhonyOp::<0>),
         ];
-        ops.iter().for_each(|op| cpu.execute_dyn(op.as_ref()));
+        ops.into_iter().for_each(|op| cpu.execute_dyn(op));
     }
 }
