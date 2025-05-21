@@ -27,9 +27,9 @@ type OpVTable<D> = HashMap<TypeId, fn(&D, Box<dyn TensorOp>)>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cpu {
     /// The unique identifier of the device.
-    id: uid::Id<DeviceId>,
+    pub id: uid::Id<DeviceId>,
     /// Operators that the device is able to execute.
-    ops: Arc<OpVTable<Self>>,
+    pub ops: Arc<OpVTable<Self>>,
 }
 
 impl Device for Cpu {
@@ -77,13 +77,13 @@ impl CpuBuilder {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Gpu {
     /// The unique identifier of the device.
-    id: uid::Id<DeviceId>,
+    pub id: uid::Id<DeviceId>,
     /// Handle to a WebGPU compute device.
-    device: wgpu::Device,
+    pub device: wgpu::Device,
     /// The WebGPU command queue.
-    queue: wgpu::Queue,
+    pub queue: wgpu::Queue,
     /// Operators that the device is able to execute.
-    ops: Arc<OpVTable<Self>>,
+    pub ops: Arc<OpVTable<Self>>,
 }
 
 impl Device for Gpu {
