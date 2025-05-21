@@ -6,7 +6,7 @@ use std::{
 use thiserror::Error;
 
 use super::{Device, DeviceId, DeviceOp, OpVTable, allocator::AllocatedOp};
-use crate::loom::ops::TensorOp;
+use crate::loom::ops::{TensorIr, TensorOp};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Gpu {
@@ -22,11 +22,13 @@ pub struct Gpu {
 
 impl Device for Gpu {
     #[inline]
-    fn execute_dyn(&self, op: Box<dyn TensorOp>) {
-        let id = op.as_ref().type_id();
-        match self.ops.get(&id) {
-            Some(f) => f(self, op),
-            None => log::error!("unable to execute op of type {id:?}"),
+    fn execute_dyn(&self, op: Box<dyn TensorOp>, io: Vec<TensorIr>) {
+        assert_eq!(op.io().len(), io.len());
+        let id = &op.as_ref().type_id();
+        let name = std::any::type_name_of_val(op.as_ref());
+        match self.ops.get(id) {
+            Some(f) => f(self, op, io),
+            None => log::error!("unable to execute op of type {}", name),
         }
     }
 }
@@ -106,8 +108,8 @@ impl GpuBuilder {
         Gpu: DeviceOp<Op>,
     {
         let id = TypeId::of::<Op>();
-        let f = |gpu: &Gpu, op: Box<dyn TensorOp>| match Box::<dyn Any>::from(op).downcast() {
-            Ok(op) => gpu.execute(*op),
+        let f = |gpu: &Gpu, op: Box<dyn TensorOp>, io| match Box::<dyn Any>::from(op).downcast() {
+            Ok(op) => gpu.execute(*op, io),
             Err(_) => unreachable!(),
         };
         self.ops.insert(id, f);

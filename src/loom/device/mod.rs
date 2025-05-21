@@ -3,7 +3,7 @@ use std::any::TypeId;
 use rustc_hash::FxHashMap as HashMap;
 use serde::{Deserialize, Serialize};
 
-use super::ops::TensorOp;
+use super::ops::{TensorIr, TensorOp};
 
 pub use cpu::{Cpu, CpuBuilder};
 pub use gpu::{Gpu, GpuBuilder};
@@ -16,16 +16,24 @@ pub mod gpu;
 pub struct DeviceId;
 
 /// Implemented for each [`Device`] for each [`TensorOp`].
-/// Defines an `op`'s actual execution on the device.
 pub trait DeviceOp<Op: TensorOp> {
-    fn execute(&self, op: Op);
+    /// Statically dispatch to actual `op`'s execution, given arguments `io`.
+    fn execute(&self, op: Op, io: Vec<TensorIr>);
 }
 
 pub trait Device {
-    fn execute_dyn(&self, op: Box<dyn TensorOp>);
+    /// Dynamically dispatch to actual `op`'s execution, given arguments `io`.
+    fn execute_dyn(&self, op: Box<dyn TensorOp>, io: Vec<TensorIr>);
+
+    /// Dynamically dispatch to actual `op`'s execution, using `op`'s own `io`.
+    #[inline]
+    fn execute_op_dyn(&self, op: Box<dyn TensorOp>) {
+        let io = op.io();
+        self.execute_dyn(op, io);
+    }
 }
 
-type OpVTable<D> = HashMap<TypeId, fn(&D, Box<dyn TensorOp>)>;
+type OpVTable<D> = HashMap<TypeId, fn(&D, Box<dyn TensorOp>, Vec<TensorIr>)>;
 
 #[cfg(test)]
 mod tests {
@@ -43,7 +51,7 @@ mod tests {
         }
 
         impl<const N: usize> DeviceOp<PhonyOp<N>> for Cpu {
-            fn execute(&self, _op: PhonyOp<N>) {
+            fn execute(&self, _op: PhonyOp<N>, _io: Vec<TensorIr>) {
                 println!("execute phony op: {N}");
             }
         }
@@ -60,6 +68,6 @@ mod tests {
             Box::new(PhonyOp::<1>),
             Box::new(PhonyOp::<0>),
         ];
-        ops.into_iter().for_each(|op| cpu.execute_dyn(op));
+        ops.into_iter().for_each(|op| cpu.execute_op_dyn(op));
     }
 }
