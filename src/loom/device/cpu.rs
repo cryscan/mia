@@ -18,11 +18,9 @@ impl Device for Cpu {
     #[inline]
     fn execute_dyn(&self, op: Box<dyn TensorOp>, io: Vec<TensorIr>) {
         assert_eq!(op.io().len(), io.len());
-        let id = &op.as_ref().type_id();
-        let name = std::any::type_name_of_val(op.as_ref());
-        match self.ops.get(id) {
+        match self.ops.get(&op.as_ref().type_id()) {
             Some(f) => f(self, op, io),
-            None => log::error!("unable to execute op of type {}", name),
+            None => log::error!("unable to execute op of type {}", op.name()),
         }
     }
 }

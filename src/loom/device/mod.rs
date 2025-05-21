@@ -37,6 +37,8 @@ type OpVTable<D> = HashMap<TypeId, fn(&D, Box<dyn TensorOp>, Vec<TensorIr>)>;
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use super::{Cpu, CpuBuilder, Device, DeviceOp};
     use crate::loom::ops::{TensorIr, TensorOp};
 
@@ -45,14 +47,18 @@ mod tests {
         struct PhonyOp<const N: usize>;
 
         impl<const N: usize> TensorOp for PhonyOp<N> {
+            fn name(&self) -> Cow<'static, str> {
+                Cow::from(std::any::type_name::<Self>())
+            }
+
             fn io(&self) -> Vec<TensorIr> {
                 vec![]
             }
         }
 
         impl<const N: usize> DeviceOp<PhonyOp<N>> for Cpu {
-            fn execute(&self, _op: PhonyOp<N>, _io: Vec<TensorIr>) {
-                println!("execute phony op: {N}");
+            fn execute(&self, op: PhonyOp<N>, _io: Vec<TensorIr>) {
+                println!("execute op: {}", op.name());
             }
         }
 
