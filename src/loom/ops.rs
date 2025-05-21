@@ -7,7 +7,7 @@ use super::{
     device::Device,
     layout::Layout,
     num::{DataType, Scalar},
-    tensor::Tensor,
+    tensor::{Tensor, TensorId},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Display, Serialize, Deserialize)]
@@ -21,9 +21,21 @@ pub enum Access {
 pub struct TensorIr {
     pub layout: Layout,
     pub r#type: DataType,
-    pub id: usize,
+    pub id: TensorId,
     pub count: usize,
     pub access: Access,
+}
+
+impl TensorIr {
+    #[inline]
+    pub fn data_count(&self) -> usize {
+        self.layout.size() * self.r#type.count()
+    }
+
+    #[inline]
+    pub fn data_size(&self) -> usize {
+        self.layout.size() * self.r#type.size()
+    }
 }
 
 impl<D: Device, T: Scalar> Tensor<D, T> {
@@ -32,7 +44,7 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
         let layout = self.layout();
         let r#type = T::DATA_TYPE;
         let count = self.ref_count();
-        let id = self.id().get();
+        let id = self.id();
         TensorIr {
             layout,
             r#type,

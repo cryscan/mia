@@ -1,33 +1,44 @@
 use std::borrow::Cow;
 
-use derive_more::{Deref, DerefMut};
+use itertools::Itertools;
 use rustc_hash::FxHashMap as HashMap;
 
 use super::{Device, DeviceOp};
-use crate::loom::ops::{Access, TensorIr, TensorOp};
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Deref, DerefMut)]
-struct TensorId(usize);
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-struct Data {
-    id: usize,
-    size: usize,
-}
+use crate::loom::{
+    ops::{Access, TensorIr, TensorOp},
+    tensor::TensorId,
+};
 
 #[allow(unused)]
 #[derive(Debug, Default, Clone)]
 pub struct Allocator {
-    map: HashMap<TensorId, Data>,
-    free: Vec<Data>,
+    map: HashMap<TensorId, TensorId>,
+    free: HashMap<usize, Vec<TensorId>>,
 }
 
 impl Allocator {
     pub fn alloc(&mut self, op: Box<dyn TensorOp>) -> AllocatedOp {
         let io = op.io();
-        let (_input, _output): (Vec<_>, Vec<_>) = io
-            .into_iter()
-            .partition(|ir| matches!(ir.access, Access::ReadOnly));
+        let mut io_ref = io.iter().collect_vec();
+
+        // collect input tensors that can be immediately reused
+        let mut short_free = io
+            .iter()
+            .filter(|ir| matches!(ir.access, Access::ReadOnly))
+            .filter(|ir| ir.count <= 1)
+            .collect_vec();
+
+        for ir in io_ref
+            .iter_mut()
+            .filter(|ir| matches!(ir.access, Access::WriteOnly))
+        {
+            if let Some((i, _)) = short_free
+                .iter()
+                .find_position(|x| x.data_size() == ir.data_size())
+            {
+                *ir = short_free.remove(i);
+            }
+        }
 
         todo!()
     }
