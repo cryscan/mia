@@ -36,6 +36,11 @@ impl TensorIr {
     pub fn data_size(&self) -> usize {
         self.layout.size() * self.r#type.size()
     }
+
+    #[inline]
+    pub fn is_compatible(&self, other: &TensorIr) -> bool {
+        self.r#type == other.r#type && self.data_count() == other.data_count()
+    }
 }
 
 impl<D: Device, T: Scalar> Tensor<D, T> {
