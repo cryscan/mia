@@ -1,5 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
+use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -24,7 +25,7 @@ pub enum TensorError {
     Slice(Layout, Slice),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 #[repr(transparent)]
 pub struct TensorId(uuid::Uuid);

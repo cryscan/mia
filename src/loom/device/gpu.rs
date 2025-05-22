@@ -5,7 +5,7 @@ use std::{
 
 use thiserror::Error;
 
-use super::{Device, DeviceId, DeviceOp, OpVTable, allocator::AllocatedOp};
+use super::{Device, DeviceId, DeviceOp, OpVTable, allocator::AllocOp};
 use crate::loom::ops::{TensorIr, TensorOp};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,7 +58,7 @@ impl GpuBuilder {
             limits: Default::default(),
             ops: Default::default(),
         }
-        .add_op::<AllocatedOp>()
+        .add_op::<AllocOp>()
     }
 
     pub async fn build(self) -> Result<Gpu, GpuBuildError> {

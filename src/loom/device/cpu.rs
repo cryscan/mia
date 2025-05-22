@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use super::{Device, DeviceId, DeviceOp, OpVTable, allocator::AllocatedOp};
+use super::{Device, DeviceId, DeviceOp, OpVTable, allocator::AllocOp};
 use crate::loom::ops::{TensorIr, TensorOp};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,7 +32,7 @@ pub struct CpuBuilder {
 
 impl CpuBuilder {
     pub fn new() -> Self {
-        Self::default().add_op::<AllocatedOp>()
+        Self::default().add_op::<AllocOp>()
     }
 
     pub fn build(self) -> Cpu {
