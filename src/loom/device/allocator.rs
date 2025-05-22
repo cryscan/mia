@@ -13,11 +13,9 @@ use crate::loom::{
 #[derive(Debug, Error)]
 pub enum AllocError {
     #[error("violation of write uniqueness rule: {0}")]
-    Write(TensorId),
+    WriteOnly(TensorId),
     #[error("violation of read/write uniqueness rule: {0}")]
     ReadWrite(TensorId),
-    #[error("violation of free uniqueness rule: {0}")]
-    Free(TensorId),
 }
 
 #[derive(Debug, Default, Clone)]
@@ -27,18 +25,15 @@ pub struct Allocator {
 }
 
 impl Allocator {
-    /// Redirects `id` and folds path. Returns the root `id`.
+    /// Redirects `id` to its root and folds path. Returns the root `id`.
     pub fn redirect(&mut self, id: TensorId) -> TensorId {
-        let mut ptr = id;
-        while let Some(&parent) = self.alloc.get(&ptr) {
-            if parent == id {
-                self.alloc.remove(&id);
-                return id;
-            }
-            ptr = parent;
+        let mut root = id;
+        while let Some(&parent) = self.alloc.get(&root) {
+            assert_ne!(parent, id);
+            root = parent;
         }
-        self.alloc.insert(id, ptr);
-        ptr
+        self.alloc.insert(id, root);
+        root
     }
 
     /// Checks if mutation uniqueness rules applies.
@@ -55,23 +50,13 @@ impl Allocator {
             if matches!(x.access, Access::WriteOnly) || matches!(y.access, Access::WriteOnly) {
                 let x = self.redirect(x.id);
                 let y = self.redirect(y.id);
-                return_eq!(x, y, Err(AllocError::Write(x)))
+                return_eq!(x, y, Err(AllocError::WriteOnly(x)))
             }
             // 2. `ReadWrite` ids mut be unique unless the other is also `ReadWrite`
             if matches!(x.access, Access::ReadWrite) ^ matches!(y.access, Access::ReadWrite) {
                 let x = self.redirect(x.id);
                 let y = self.redirect(y.id);
                 return_eq!(x, y, Err(AllocError::ReadWrite(x)))
-            }
-        }
-        for x in io.iter() {
-            // 3. free ids must be unique
-            let size = &x.data_size();
-            let x = self.redirect(x.id);
-            if let Some(free) = self.free.get(size) {
-                for &y in free.iter() {
-                    return_eq!(x, y, Err(AllocError::Free(x)))
-                }
             }
         }
         Ok(())
@@ -141,7 +126,11 @@ impl Allocator {
         let io = io
             .into_iter()
             .map(|ir| Rc::into_inner(ir).unwrap().into_inner())
-            .collect();
+            .collect_vec();
+
+        // check for reused free ids
+        self.check(&io)?;
+
         Ok(AllocOp { op, io })
     }
 }
