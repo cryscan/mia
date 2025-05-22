@@ -1,4 +1,4 @@
-use std::{any::Any, borrow::Cow};
+use std::{any::Any, borrow::Cow, fmt::Debug};
 
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
@@ -85,5 +85,37 @@ impl From<Box<dyn TensorOp>> for Box<dyn Any> {
     fn from(value: Box<dyn TensorOp>) -> Self {
         let value = Box::leak(value);
         unsafe { Box::from_raw(value as *mut dyn Any) }
+    }
+}
+
+/// Records operators a tensor has experienced.
+pub struct TensorTape {
+    /// The ID of the tensor itself.
+    pub this: TensorId,
+    /// Operators the tensor has experienced.
+    pub ops: Vec<Box<dyn TensorOp>>,
+}
+
+impl Debug for TensorTape {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TensorTape")
+            .field("this", &self.this)
+            .finish()
+    }
+}
+
+impl PartialEq for TensorTape {
+    fn eq(&self, other: &Self) -> bool {
+        self.this == other.this
+    }
+}
+
+impl Eq for TensorTape {}
+
+impl TensorTape {
+    #[inline]
+    pub fn new(this: TensorId) -> Self {
+        let ops = vec![];
+        Self { this, ops }
     }
 }

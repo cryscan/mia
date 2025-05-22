@@ -8,6 +8,7 @@ use super::{
     device::Device,
     layout::{IntoLayout, Layout},
     num::{DataType, Scalar},
+    ops::TensorTape,
     slice::Slice,
 };
 
@@ -36,6 +37,7 @@ pub struct Tensor<D, T> {
     device: Arc<D>,
     layout: Layout,
     id: TensorId,
+    tape: Arc<TensorTape>,
     phantom: PhantomData<T>,
 }
 
@@ -67,7 +69,7 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
 
     #[inline]
     pub fn ref_count(&self) -> usize {
-        Arc::strong_count(&self.device)
+        Arc::strong_count(&self.tape)
     }
 
     /// Reshape the tensor, leaving the underlying data untouched.
@@ -89,29 +91,33 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
         if self.data_size() != size {
             return Err(TensorError::Cast(self.data_size(), size));
         }
-        let Self { device, id, .. } = self;
+        let device = self.device;
+        let id = self.id;
+        let tape = self.tape;
         let phantom = PhantomData;
         Ok(Tensor {
             device,
             layout,
             id,
+            tape,
             phantom,
         })
     }
 }
 
-impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
+impl<D: Device, T: Scalar> Tensor<D, T> {
     /// Create a tensor of zeros.
     #[inline]
-    pub fn zeros(device: &D, layout: impl IntoLayout) -> Self {
-        let device = device.clone().into();
+    pub fn zeros(device: Arc<D>, layout: impl IntoLayout) -> Self {
         let layout = layout.into_layout();
         let id = TensorId(uuid::Uuid::new_v4());
+        let tape = TensorTape::new(id).into();
         let phantom = PhantomData;
         Self {
             device,
             layout,
             id,
+            tape,
             phantom,
         }
     }
@@ -119,14 +125,16 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
     /// Create a tensor of zeros from current device and layout.
     #[inline]
     pub fn zeros_like(&self) -> Self {
-        let device = self.device.as_ref().clone().into();
+        let device = self.device.clone();
         let layout = self.layout();
         let id = TensorId(uuid::Uuid::new_v4());
+        let tape = TensorTape::new(id).into();
         let phantom = PhantomData;
         Self {
             device,
             layout,
             id,
+            tape,
             phantom,
         }
     }

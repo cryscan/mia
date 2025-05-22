@@ -11,6 +11,7 @@ use crate::loom::ops::{TensorIr, TensorOp};
 
 #[derive(Debug, Clone)]
 pub struct Backend {
+    /// Operators that the device is able to execute.
     ops: Arc<OpVTable<Self>>,
 }
 
