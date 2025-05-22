@@ -4,7 +4,7 @@ use itertools::Itertools;
 use rustc_hash::FxHashMap as HashMap;
 use thiserror::Error;
 
-use super::{Device, DeviceOp};
+use super::{Backend, BackendOp};
 use crate::loom::{
     ops::{Access, TensorIr, TensorOp},
     tensor::TensorId,
@@ -32,7 +32,9 @@ impl Allocator {
             assert_ne!(parent, id);
             root = parent;
         }
-        self.alloc.insert(id, root);
+        if root != id {
+            self.alloc.insert(id, root);
+        }
         root
     }
 
@@ -71,7 +73,8 @@ impl Allocator {
 
         // 1. substitute tensor ids following the redirection map
         for ir in io.iter() {
-            ir.borrow_mut().id = self.redirect(ir.borrow().id);
+            let id = ir.borrow().id;
+            ir.borrow_mut().id = self.redirect(id);
         }
 
         // 2. tensors that can be immediately reused
@@ -111,7 +114,8 @@ impl Allocator {
 
         // 5. substitute tensor ids once more after updating the map
         for ir in io.iter() {
-            ir.borrow_mut().id = self.redirect(ir.borrow().id);
+            let id = ir.borrow().id;
+            ir.borrow_mut().id = self.redirect(id);
         }
 
         // 6. update the free list
@@ -132,6 +136,11 @@ impl Allocator {
         self.check(&io)?;
 
         Ok(AllocOp { op, io })
+    }
+
+    #[inline]
+    pub fn reset(&mut self) {
+        *self = Default::default()
     }
 }
 
@@ -155,9 +164,173 @@ impl TensorOp for AllocOp {
     }
 }
 
-impl<D: Device> DeviceOp<AllocOp> for D {
+impl<B: Backend> BackendOp<AllocOp> for B {
     #[inline]
     fn execute(&self, op: AllocOp, io: Vec<TensorIr>) {
-        self.execute_dyn(op.op, io);
+        self.execute(op.op, io);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg(test)]
+mod tests {
+    use std::{borrow::Cow, time::Duration};
+
+    use anyhow::Result;
+    use itertools::Itertools;
+
+    use crate::loom::{
+        device::{BackendOp, CpuBuilder, Device, cpu},
+        layout::Layout,
+        num::DataType,
+        ops::{Access, TensorIr, TensorOp},
+        tensor::TensorId,
+    };
+
+    struct PhonyBinaryOp {
+        input: [TensorIr; 2],
+        output: TensorIr,
+    }
+
+    impl TensorOp for PhonyBinaryOp {
+        fn name(&self) -> Cow<'static, str> {
+            Cow::Borrowed("BinaryOp")
+        }
+
+        fn io(&self) -> Vec<TensorIr> {
+            vec![
+                self.input[0].clone(),
+                self.input[1].clone(),
+                self.output.clone(),
+            ]
+        }
+    }
+
+    impl BackendOp<PhonyBinaryOp> for cpu::Backend {
+        fn execute(&self, op: PhonyBinaryOp, io: Vec<TensorIr>) {
+            println!("{}", op.name());
+            for (x, y) in op.io().into_iter().zip_eq(io) {
+                println!("{}\t{}\t→\t{}\t{}", x.access, x.id, y.access, y.id);
+            }
+            println!()
+        }
+    }
+
+    struct PhonyUnaryOp {
+        input: TensorIr,
+        output: TensorIr,
+    }
+
+    impl TensorOp for PhonyUnaryOp {
+        fn name(&self) -> Cow<'static, str> {
+            Cow::Borrowed("UnaryOp")
+        }
+
+        fn io(&self) -> Vec<TensorIr> {
+            vec![self.input.clone(), self.output.clone()]
+        }
+    }
+
+    impl BackendOp<PhonyUnaryOp> for cpu::Backend {
+        fn execute(&self, op: PhonyUnaryOp, io: Vec<TensorIr>) {
+            println!("{}", op.name());
+            for (x, y) in op.io().into_iter().zip_eq(io) {
+                println!("{}\t{}\t→\t{}\t{}", x.access, x.id, y.access, y.id);
+            }
+            println!()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_reuse() -> Result<()> {
+        let cpu = CpuBuilder::new()
+            .add_op::<PhonyBinaryOp>()
+            .add_op::<PhonyUnaryOp>()
+            .build()
+            .await;
+
+        let op = PhonyBinaryOp {
+            input: [
+                TensorIr {
+                    layout: Layout::from_shape([32]),
+                    r#type: DataType::F32x4,
+                    id: TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000000")),
+                    count: 1,
+                    access: Access::ReadOnly,
+                },
+                TensorIr {
+                    layout: Layout::from_shape([32]),
+                    r#type: DataType::F16x4,
+                    id: TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000001")),
+                    count: 1,
+                    access: Access::ReadOnly,
+                },
+            ],
+            output: TensorIr {
+                layout: Layout::from_shape([32]),
+                r#type: DataType::F16x4,
+                id: TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000002")),
+                count: 1,
+                access: Access::WriteOnly,
+            },
+        };
+        cpu.execute(Box::new(op));
+
+        let op = PhonyBinaryOp {
+            input: [
+                TensorIr {
+                    layout: Layout::from_shape([32]),
+                    r#type: DataType::F32x4,
+                    id: TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000002")),
+                    count: 2,
+                    access: Access::ReadOnly,
+                },
+                TensorIr {
+                    layout: Layout::from_shape([32]),
+                    r#type: DataType::F16x4,
+                    id: TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000003")),
+                    count: 1,
+                    access: Access::ReadOnly,
+                },
+            ],
+            output: TensorIr {
+                layout: Layout::from_shape([32]),
+                r#type: DataType::F32x4,
+                id: TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000004")),
+                count: 1,
+                access: Access::WriteOnly,
+            },
+        };
+        cpu.execute(Box::new(op));
+
+        let op = PhonyBinaryOp {
+            input: [
+                TensorIr {
+                    layout: Layout::from_shape([32]),
+                    r#type: DataType::F32x4,
+                    id: TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000004")),
+                    count: 1,
+                    access: Access::ReadOnly,
+                },
+                TensorIr {
+                    layout: Layout::from_shape([32]),
+                    r#type: DataType::F32x4,
+                    id: TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000002")),
+                    count: 2,
+                    access: Access::ReadOnly,
+                },
+            ],
+            output: TensorIr {
+                layout: Layout::from_shape([32]),
+                r#type: DataType::F32x4,
+                id: TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000005")),
+                count: 1,
+                access: Access::WriteOnly,
+            },
+        };
+        cpu.execute(Box::new(op));
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        Ok(())
     }
 }
