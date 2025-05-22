@@ -28,7 +28,7 @@ pub enum TensorError {
 #[derive(Debug, Display, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 #[repr(transparent)]
-pub struct TensorId(uuid::Uuid);
+pub struct TensorId(pub uuid::Uuid);
 
 /// A statically typed tensor. Good to fit into typed APIs.
 #[derive(Debug, Clone, PartialEq, Eq)]
