@@ -1,7 +1,8 @@
-use std::{borrow::Cow, cell::RefCell, rc::Rc};
+use std::{borrow::Cow, cell::RefCell, collections::VecDeque, rc::Rc};
 
 use itertools::Itertools;
 use rustc_hash::FxHashMap as HashMap;
+use thiserror::Error;
 
 use super::{Device, DeviceOp};
 use crate::loom::{
@@ -9,29 +10,94 @@ use crate::loom::{
     tensor::TensorId,
 };
 
-#[allow(unused)]
+#[derive(Debug, Error)]
+pub enum AllocError {
+    #[error("violation of write uniqueness rule: {0}")]
+    Write(TensorId),
+    #[error("violation of read/write uniqueness rule: {0}")]
+    ReadWrite(TensorId),
+    #[error("violation of free uniqueness rule: {0}")]
+    Free(TensorId),
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Allocator {
-    map: HashMap<TensorId, TensorId>,
-    free: HashMap<usize, Vec<TensorId>>,
+    alloc: HashMap<TensorId, TensorId>,
+    free: HashMap<usize, VecDeque<TensorId>>,
 }
 
 impl Allocator {
-    pub fn alloc(&mut self, op: Box<dyn TensorOp>) -> AllocatedOp {
-        let io = op
-            .io()
-            .into_iter()
-            .map(RefCell::new)
-            .map(Rc::new)
-            .collect_vec();
+    /// Redirects `id` and folds path. Returns the root `id`.
+    pub fn redirect(&mut self, id: TensorId) -> TensorId {
+        let mut ptr = id;
+        while let Some(&parent) = self.alloc.get(&ptr) {
+            if parent == id {
+                self.alloc.remove(&id);
+                return id;
+            }
+            ptr = parent;
+        }
+        self.alloc.insert(id, ptr);
+        ptr
+    }
 
-        // tensors that can be immediately reused
+    /// Checks if mutation uniqueness rules applies.
+    fn check(&mut self, io: &[TensorIr]) -> Result<(), AllocError> {
+        macro_rules! return_eq {
+            ($x:expr, $y:expr, $ret:expr) => {
+                if $x == $y {
+                    return $ret;
+                }
+            };
+        }
+        for (x, y) in io.iter().tuple_combinations() {
+            // 1. `WriteOnly` ids must be unique
+            if matches!(x.access, Access::WriteOnly) || matches!(y.access, Access::WriteOnly) {
+                let x = self.redirect(x.id);
+                let y = self.redirect(y.id);
+                return_eq!(x, y, Err(AllocError::Write(x)))
+            }
+            // 2. `ReadWrite` ids mut be unique unless the other is also `ReadWrite`
+            if matches!(x.access, Access::ReadWrite) ^ matches!(y.access, Access::ReadWrite) {
+                let x = self.redirect(x.id);
+                let y = self.redirect(y.id);
+                return_eq!(x, y, Err(AllocError::ReadWrite(x)))
+            }
+        }
+        for x in io.iter() {
+            // 3. free ids must be unique
+            let size = &x.data_size();
+            let x = self.redirect(x.id);
+            if let Some(free) = self.free.get(size) {
+                for &y in free.iter() {
+                    return_eq!(x, y, Err(AllocError::Free(x)))
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn alloc(&mut self, op: Box<dyn TensorOp>) -> Result<AllocOp, AllocError> {
+        let io = op.io();
+        self.check(&io)?;
+
+        // 0. convert to shared ref with internal mutability
+        let io = io.into_iter().map(RefCell::new).map(Rc::new).collect_vec();
+
+        // 1. substitute tensor ids following the redirection map
+        for ir in io.iter() {
+            ir.borrow_mut().id = self.redirect(ir.borrow().id);
+        }
+
+        // 2. tensors that can be immediately reused
         let mut free = io
             .iter()
             .filter(|ir| matches!(ir.borrow().access, Access::ReadOnly))
             .filter(|ir| ir.borrow().count <= 1)
             .cloned()
             .collect_vec();
+
+        // 3. reuse tensors from the local free list
         for x in io
             .iter()
             .filter(|ir| matches!(ir.borrow().access, Access::WriteOnly))
@@ -41,59 +107,52 @@ impl Allocator {
                 .find_position(|y| y.borrow().is_compatible(&x.borrow()))
             {
                 let y = free.remove(index);
-                x.borrow_mut().id = y.borrow().id;
                 x.borrow_mut().access = Access::ReadWrite;
                 y.borrow_mut().access = Access::ReadWrite;
+                self.alloc.insert(x.borrow().id, y.borrow().id);
             }
         }
 
-        // reuse tensors from the global free list by building a redirection map
-        for x in io
+        // 4. reuse tensors from the allocator's free list
+        for ir in io
             .iter()
             .filter(|ir| matches!(ir.borrow().access, Access::WriteOnly))
         {
-            if let Some(free) = self
-                .free
-                .get_mut(&x.borrow().data_size())
-                .and_then(|free| free.pop())
-            {
-                self.map.insert(x.borrow().id, free);
+            let size = &ir.borrow().data_size();
+            if let Some(id) = self.free.get_mut(size).and_then(|free| free.pop_front()) {
+                self.alloc.insert(ir.borrow().id, id);
             }
         }
 
-        // substitute tensor ids following the redirection map
+        // 5. substitute tensor ids once more after updating the map
         for ir in io.iter() {
-            let id = ir.borrow().id;
-            let id = match self.map.get(&id) {
-                Some(&id) => id,
-                None => id,
-            };
-            ir.borrow_mut().id = id;
+            ir.borrow_mut().id = self.redirect(ir.borrow().id);
         }
 
-        // expand the free list
+        // 6. update the free list
         for ir in free {
             let size = ir.borrow().data_size();
             let id = ir.borrow().id;
-            if let Some(ids) = self.free.get_mut(&size) {
-                ids.push(id);
-            } else {
-                self.free.insert(size, vec![id]);
-            }
+            let mut ids = self.free.remove(&size).unwrap_or_default();
+            ids.push_back(id);
+            self.free.insert(size, ids);
         }
 
-        let io = io.into_iter().map(|ir| ir.borrow().clone()).collect();
-        AllocatedOp { op, io }
+        let io = io
+            .into_iter()
+            .map(|ir| Rc::into_inner(ir).unwrap().into_inner())
+            .collect();
+        Ok(AllocOp { op, io })
     }
 }
 
 /// A wrapper around another [`TensorOp`], of which storages are optimized by the allocator.
-pub struct AllocatedOp {
+pub struct AllocOp {
     op: Box<dyn TensorOp>,
     io: Vec<TensorIr>,
 }
 
-impl TensorOp for AllocatedOp {
+impl TensorOp for AllocOp {
     #[inline]
     fn name(&self) -> Cow<'static, str> {
         let type_name = std::any::type_name::<Self>();
@@ -107,9 +166,9 @@ impl TensorOp for AllocatedOp {
     }
 }
 
-impl<D: Device> DeviceOp<AllocatedOp> for D {
+impl<D: Device> DeviceOp<AllocOp> for D {
     #[inline]
-    fn execute(&self, op: AllocatedOp, io: Vec<TensorIr>) {
+    fn execute(&self, op: AllocOp, io: Vec<TensorIr>) {
         self.execute_dyn(op.op, io);
     }
 }
