@@ -14,8 +14,11 @@ use crate::loom::ops::{TensorIr, TensorOp};
 #[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct Backend {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    /// Handle to a WebGPU compute device.
+    pub device: wgpu::Device,
+    /// The WebGPU command queue.
+    pub queue: wgpu::Queue,
+    /// Operators that the device is able to execute.
     ops: Arc<OpVTable<Self>>,
 }
 
