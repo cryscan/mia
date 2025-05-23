@@ -184,7 +184,7 @@ mod tests {
         device::{BackendOp, CpuBuilder, Device, cpu},
         layout::Layout,
         num::DataType,
-        ops::{Access, TensorIr, TensorOp},
+        ops::{Access, TensorIr, TensorOp, TensorTape},
         tensor::TensorId,
     };
 
@@ -244,6 +244,17 @@ mod tests {
         }
     }
 
+    const ID_MAP: [TensorId; 8] = [
+        TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000000")),
+        TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000001")),
+        TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000002")),
+        TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000003")),
+        TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000004")),
+        TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000005")),
+        TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000006")),
+        TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000007")),
+    ];
+
     #[tokio::test]
     async fn test_reuse() -> Result<()> {
         let cpu = CpuBuilder::new()
@@ -252,86 +263,102 @@ mod tests {
             .build()
             .await;
 
-        let op = PhonyBinaryOp {
-            input: [
-                TensorIr {
-                    layout: Layout::from_shape([32]),
-                    r#type: DataType::F32x4,
-                    id: TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000000")),
-                    count: 1,
-                    access: Access::ReadOnly,
-                },
-                TensorIr {
-                    layout: Layout::from_shape([32]),
-                    r#type: DataType::F16x4,
-                    id: TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000001")),
-                    count: 1,
-                    access: Access::ReadOnly,
-                },
-            ],
-            output: TensorIr {
-                layout: Layout::from_shape([32]),
-                r#type: DataType::F16x4,
-                id: TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000002")),
-                count: 1,
-                access: Access::WriteOnly,
-            },
-        };
-        cpu.execute(Box::new(op));
-
-        let op = PhonyBinaryOp {
-            input: [
-                TensorIr {
-                    layout: Layout::from_shape([32]),
-                    r#type: DataType::F32x4,
-                    id: TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000002")),
-                    count: 2,
-                    access: Access::ReadOnly,
-                },
-                TensorIr {
+        let ops: Vec<Box<dyn TensorOp>> = vec![
+            Box::new(PhonyBinaryOp {
+                input: [
+                    TensorIr {
+                        layout: Layout::from_shape([32]),
+                        r#type: DataType::F32x4,
+                        id: ID_MAP[0],
+                        count: 1,
+                        access: Access::ReadOnly,
+                    },
+                    TensorIr {
+                        layout: Layout::from_shape([32]),
+                        r#type: DataType::F16x4,
+                        id: ID_MAP[1],
+                        count: 1,
+                        access: Access::ReadOnly,
+                    },
+                ],
+                output: TensorIr {
                     layout: Layout::from_shape([32]),
                     r#type: DataType::F16x4,
-                    id: TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000003")),
+                    id: ID_MAP[2],
+                    count: 1,
+                    access: Access::WriteOnly,
+                },
+            }),
+            Box::new(PhonyBinaryOp {
+                input: [
+                    TensorIr {
+                        layout: Layout::from_shape([32]),
+                        r#type: DataType::F32x4,
+                        id: ID_MAP[2],
+                        count: 2,
+                        access: Access::ReadOnly,
+                    },
+                    TensorIr {
+                        layout: Layout::from_shape([32]),
+                        r#type: DataType::F16x4,
+                        id: ID_MAP[3],
+                        count: 1,
+                        access: Access::ReadOnly,
+                    },
+                ],
+                output: TensorIr {
+                    layout: Layout::from_shape([32]),
+                    r#type: DataType::F32x4,
+                    id: ID_MAP[4],
+                    count: 1,
+                    access: Access::WriteOnly,
+                },
+            }),
+            Box::new(PhonyBinaryOp {
+                input: [
+                    TensorIr {
+                        layout: Layout::from_shape([32]),
+                        r#type: DataType::F32x4,
+                        id: ID_MAP[4],
+                        count: 1,
+                        access: Access::ReadOnly,
+                    },
+                    TensorIr {
+                        layout: Layout::from_shape([32]),
+                        r#type: DataType::F32x4,
+                        id: ID_MAP[2],
+                        count: 2,
+                        access: Access::ReadOnly,
+                    },
+                ],
+                output: TensorIr {
+                    layout: Layout::from_shape([32]),
+                    r#type: DataType::F32x4,
+                    id: ID_MAP[5],
+                    count: 1,
+                    access: Access::WriteOnly,
+                },
+            }),
+            Box::new(PhonyUnaryOp {
+                input: TensorIr {
+                    layout: Layout::from_shape([32]),
+                    r#type: DataType::F32x4,
+                    id: ID_MAP[2],
                     count: 1,
                     access: Access::ReadOnly,
                 },
-            ],
-            output: TensorIr {
-                layout: Layout::from_shape([32]),
-                r#type: DataType::F32x4,
-                id: TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000004")),
-                count: 1,
-                access: Access::WriteOnly,
-            },
-        };
-        cpu.execute(Box::new(op));
-
-        let op = PhonyBinaryOp {
-            input: [
-                TensorIr {
+                output: TensorIr {
                     layout: Layout::from_shape([32]),
                     r#type: DataType::F32x4,
-                    id: TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000004")),
+                    id: ID_MAP[6],
                     count: 1,
-                    access: Access::ReadOnly,
+                    access: Access::WriteOnly,
                 },
-                TensorIr {
-                    layout: Layout::from_shape([32]),
-                    r#type: DataType::F32x4,
-                    id: TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000002")),
-                    count: 2,
-                    access: Access::ReadOnly,
-                },
-            ],
-            output: TensorIr {
-                layout: Layout::from_shape([32]),
-                r#type: DataType::F32x4,
-                id: TensorId(uuid::uuid!("00000000-0000-0000-0000-ffff00000005")),
-                count: 1,
-                access: Access::WriteOnly,
-            },
-        };
-        cpu.execute(Box::new(op));
+            }),
+        ];
+        let this = ID_MAP[5];
+        let tape = TensorTape { this, ops };
+        cpu.execute(tape);
 
         tokio::time::sleep(Duration::from_secs(1)).await;
         Ok(())
