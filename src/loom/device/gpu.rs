@@ -42,8 +42,6 @@ pub struct Gpu {
     device: wgpu::Device,
     /// The WebGPU command queue.
     queue: wgpu::Queue,
-    /// Operators that the device is able to execute.
-    ops: Arc<OpVTable<Backend>>,
     /// Sends ops to execute to the backend.
     sender: flume::Sender<Box<dyn TensorOp>>,
 }
@@ -106,22 +104,20 @@ impl GpuBuilder {
         let ops = Arc::new(ops);
 
         let (sender, receiver) = flume::unbounded();
-        {
-            let ops = ops.clone();
+        let backend = {
             let device = device.clone();
             let queue = queue.clone();
-            let backend = Backend { ops, device, queue };
-            #[cfg(not(target_arch = "wasm32"))]
-            tokio::spawn(run(backend, receiver));
-            #[cfg(target_arch = "wasm32")]
-            wasm_bindgen_futures::spawn_local(run(backend, receiver));
-        }
+            Backend { ops, device, queue }
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        tokio::spawn(run(backend, receiver));
+        #[cfg(target_arch = "wasm32")]
+        wasm_bindgen_futures::spawn_local(run(backend, receiver));
 
         let device = Gpu {
             id,
             device,
             queue,
-            ops,
             sender,
         };
         Ok(device)
