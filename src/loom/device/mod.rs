@@ -43,6 +43,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_op() {
+        #[derive(Debug, Clone)]
         struct PhonyOp<const N: usize>;
 
         impl<const N: usize> TensorOp for PhonyOp<N> {

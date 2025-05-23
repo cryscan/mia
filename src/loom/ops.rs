@@ -1,6 +1,7 @@
-use std::{any::Any, borrow::Cow, fmt::Debug};
+use std::{any::Any, borrow::Cow};
 
 use derive_more::Display;
+use dyn_clone::DynClone;
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -60,12 +61,14 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
     }
 }
 
-pub trait TensorOp: Send + Sync + Any {
+pub trait TensorOp: DynClone + Send + Sync + Any {
     /// Name of the op.
     fn name(&self) -> Cow<'static, str>;
     /// Input and output tensors of the op.
     fn io(&self) -> Vec<TensorIr>;
 }
+
+dyn_clone::clone_trait_object!(TensorOp);
 
 impl std::ops::Deref for dyn TensorOp {
     type Target = dyn Any;
@@ -88,20 +91,22 @@ impl From<Box<dyn TensorOp>> for Box<dyn Any> {
     }
 }
 
+impl std::fmt::Debug for dyn TensorOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TensorOp")
+            .field("name", &self.name())
+            .field("io", &self.io())
+            .finish()
+    }
+}
+
 /// Records operators a tensor has experienced.
+#[derive(Debug, Clone)]
 pub struct TensorTape {
     /// The ID of the tensor itself.
     pub this: TensorId,
     /// Operators the tensor has experienced.
     pub ops: Vec<Box<dyn TensorOp>>,
-}
-
-impl Debug for TensorTape {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TensorTape")
-            .field("this", &self.this)
-            .finish()
-    }
 }
 
 impl PartialEq for TensorTape {

@@ -145,6 +145,7 @@ impl Allocator {
 }
 
 /// A wrapper around another [`TensorOp`], of which storages are optimized by the allocator.
+#[derive(Debug, Clone)]
 pub struct AllocOp {
     op: Box<dyn TensorOp>,
     io: Vec<TensorIr>,
@@ -187,6 +188,7 @@ mod tests {
         tensor::TensorId,
     };
 
+    #[derive(Debug, Clone)]
     struct PhonyBinaryOp {
         input: [TensorIr; 2],
         output: TensorIr,
@@ -216,6 +218,7 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Clone)]
     struct PhonyUnaryOp {
         input: TensorIr,
         output: TensorIr,

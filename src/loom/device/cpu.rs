@@ -31,8 +31,6 @@ impl super::Backend for Backend {
 pub struct Cpu {
     /// The unique identifier of the device.
     id: uid::Id<DeviceId>,
-    /// Operators that the device is able to execute.
-    ops: Arc<OpVTable<Backend>>,
     /// Sends ops to execute to the backend.
     sender: flume::Sender<Box<dyn TensorOp>>,
 }
@@ -58,16 +56,13 @@ impl CpuBuilder {
         let ops = Arc::new(self.ops);
 
         let (sender, receiver) = flume::unbounded();
-        {
-            let ops = ops.clone();
-            let backend = Backend { ops };
-            #[cfg(not(target_arch = "wasm32"))]
-            tokio::spawn(run(backend, receiver));
-            #[cfg(target_arch = "wasm32")]
-            wasm_bindgen_futures::spawn_local(run(backend, receiver));
-        }
+        let backend = Backend { ops };
+        #[cfg(not(target_arch = "wasm32"))]
+        tokio::spawn(run(backend, receiver));
+        #[cfg(target_arch = "wasm32")]
+        wasm_bindgen_futures::spawn_local(run(backend, receiver));
 
-        Cpu { id, ops, sender }
+        Cpu { id, sender }
     }
 
     pub fn add_op<Op>(mut self) -> Self
