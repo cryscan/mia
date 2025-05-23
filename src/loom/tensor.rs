@@ -26,7 +26,7 @@ pub enum TensorError {
     Slice(Layout, Slice),
 }
 
-#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Default, Display, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 #[repr(transparent)]
 pub struct TensorId(pub uuid::Uuid);

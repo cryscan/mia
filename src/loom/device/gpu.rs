@@ -9,7 +9,7 @@ use super::{
     BackendOp, Device, DeviceId, OpVTable,
     allocator::{AllocOp, Allocator},
 };
-use crate::loom::ops::{TensorIr, TensorOp};
+use crate::loom::ops::{TensorIr, TensorOp, TensorTape};
 
 #[allow(unused)]
 #[derive(Debug, Clone)]
@@ -43,12 +43,12 @@ pub struct Gpu {
     /// The WebGPU command queue.
     queue: wgpu::Queue,
     /// Sends ops to execute to the backend.
-    sender: flume::Sender<Box<dyn TensorOp>>,
+    sender: flume::Sender<TensorTape>,
 }
 
 impl Device for Gpu {
-    fn execute(&self, op: Box<dyn TensorOp>) {
-        let _ = self.sender.send(op);
+    fn execute(&self, tape: TensorTape) {
+        let _ = self.sender.send(tape);
     }
 }
 
@@ -148,17 +148,26 @@ impl GpuBuilder {
     }
 }
 
-async fn run(backend: Backend, receiver: flume::Receiver<Box<dyn TensorOp>>) {
+async fn run(backend: Backend, receiver: flume::Receiver<TensorTape>) {
+    while let Ok(tape) = receiver.recv_async().await {
+        let this = tape.this;
+        match execute_tape(&backend, tape) {
+            Ok(_) => log::info!("{this}"),
+            Err(err) => log::error!("{err}"),
+        }
+    }
+}
+
+fn execute_tape(backend: &Backend, tape: TensorTape) -> Result<(), Box<dyn std::error::Error>> {
     let mut allocator = Allocator::default();
-    while let Ok(op) = receiver.recv_async().await {
-        let op = match allocator.alloc(op) {
-            Ok(op) => op,
-            Err(err) => {
-                log::error!("{}", err);
-                continue;
-            }
-        };
+    let ops = tape
+        .ops
+        .into_iter()
+        .map(|op| allocator.alloc(op))
+        .collect::<Result<Vec<_>, _>>()?;
+    for op in ops {
         let io = op.io();
         backend.execute(op, io);
     }
+    Ok(())
 }

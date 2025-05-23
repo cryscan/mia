@@ -3,7 +3,7 @@ use std::any::TypeId;
 use rustc_hash::FxHashMap as HashMap;
 use serde::{Deserialize, Serialize};
 
-use super::ops::{TensorIr, TensorOp};
+use super::ops::{TensorIr, TensorOp, TensorTape};
 
 pub use cpu::{Cpu, CpuBuilder};
 pub use gpu::{Gpu, GpuBuilder};
@@ -17,7 +17,7 @@ pub struct DeviceId;
 
 pub trait Device {
     /// Dynamically dispatch to actual `op`'s execution, using `op`'s own `io`.
-    fn execute(&self, op: Box<dyn TensorOp>);
+    fn execute(&self, tape: TensorTape);
 }
 
 /// Implemented for each [`Device`] for each [`TensorOp`].
@@ -39,7 +39,7 @@ mod tests {
     use std::{borrow::Cow, time::Duration};
 
     use super::{BackendOp, CpuBuilder, Device, cpu};
-    use crate::loom::ops::{TensorIr, TensorOp};
+    use crate::loom::ops::{TensorIr, TensorOp, TensorTape};
 
     #[tokio::test]
     async fn test_add_op() {
@@ -75,7 +75,9 @@ mod tests {
             Box::new(PhonyOp::<1>),
             Box::new(PhonyOp::<0>),
         ];
-        ops.into_iter().for_each(|op| cpu.execute(op));
+        let this = Default::default();
+        let tape = TensorTape { this, ops };
+        cpu.execute(tape);
 
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
