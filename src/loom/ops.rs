@@ -1,6 +1,6 @@
 use std::{any::Any, borrow::Cow};
 
-use derive_more::Display;
+use derive_more::{Deref, DerefMut, Display};
 use dyn_clone::DynClone;
 use serde::{Deserialize, Serialize};
 
@@ -61,9 +61,14 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Deref, DerefMut)]
+pub struct TensorOpId(uid::Id<TensorOpId>);
+
 pub trait TensorOp: DynClone + Send + Sync + Any {
     /// Name of the op.
     fn name(&self) -> Cow<'static, str>;
+    /// Id of the op.
+    fn id(&self) -> TensorOpId;
     /// Input and output tensors of the op.
     fn io(&self) -> Vec<TensorIr>;
 }
@@ -101,10 +106,12 @@ impl std::fmt::Debug for dyn TensorOp {
 }
 
 /// Records operators a tensor has experienced.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct TensorTape {
     /// The ID of the tensor itself.
     pub this: TensorId,
+    /// The interface to report results back.
+    pub report: Option<flume::Sender<Box<[u8]>>>,
     /// Operators the tensor has experienced.
     pub ops: Vec<Box<dyn TensorOp>>,
 }
@@ -116,11 +123,3 @@ impl PartialEq for TensorTape {
 }
 
 impl Eq for TensorTape {}
-
-impl TensorTape {
-    #[inline]
-    pub fn new(this: TensorId) -> Self {
-        let ops = vec![];
-        Self { this, ops }
-    }
-}

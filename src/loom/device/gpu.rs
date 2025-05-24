@@ -37,7 +37,7 @@ impl super::Backend for Backend {
 #[derive(Debug, Clone)]
 pub struct Gpu {
     /// The unique identifier of the device.
-    id: uid::Id<DeviceId>,
+    id: DeviceId,
     /// Handle to a WebGPU compute device.
     device: wgpu::Device,
     /// The WebGPU command queue.
@@ -100,7 +100,7 @@ impl GpuBuilder {
             })
             .await?;
 
-        let id = uid::Id::new();
+        let id = Default::default();
         let ops = Arc::new(ops);
 
         let (sender, receiver) = flume::unbounded();
