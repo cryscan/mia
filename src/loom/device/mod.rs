@@ -1,7 +1,7 @@
 use std::any::TypeId;
 
+use derive_more::{Deref, DerefMut};
 use rustc_hash::FxHashMap as HashMap;
-use serde::{Deserialize, Serialize};
 
 use super::ops::{TensorIr, TensorOp, TensorTape};
 
@@ -12,8 +12,8 @@ pub mod allocator;
 pub mod cpu;
 pub mod gpu;
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct DeviceId;
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Deref, DerefMut)]
+pub struct DeviceId(uid::Id<DeviceId>);
 
 pub trait Device {
     /// Dynamically dispatch to actual `op`'s execution, using `op`'s own `io`.
@@ -39,16 +39,20 @@ mod tests {
     use std::{borrow::Cow, time::Duration};
 
     use super::{BackendOp, CpuBuilder, Device, cpu};
-    use crate::loom::ops::{TensorIr, TensorOp, TensorTape};
+    use crate::loom::ops::{TensorIr, TensorOp, TensorOpId, TensorTape};
 
     #[tokio::test]
     async fn test_add_op() {
-        #[derive(Debug, Clone)]
-        struct PhonyOp<const N: usize>;
+        #[derive(Debug, Default, Clone)]
+        struct PhonyOp<const N: usize>(TensorOpId);
 
         impl<const N: usize> TensorOp for PhonyOp<N> {
             fn name(&self) -> Cow<'static, str> {
                 Cow::from(std::any::type_name::<Self>())
+            }
+
+            fn id(&self) -> TensorOpId {
+                self.0
             }
 
             fn io(&self) -> Vec<TensorIr> {
@@ -70,13 +74,15 @@ mod tests {
             .build()
             .await;
         let ops: Vec<Box<dyn TensorOp>> = vec![
-            Box::new(PhonyOp::<3>),
-            Box::new(PhonyOp::<2>),
-            Box::new(PhonyOp::<1>),
-            Box::new(PhonyOp::<0>),
+            Box::new(PhonyOp::<3>::default()),
+            Box::new(PhonyOp::<2>::default()),
+            Box::new(PhonyOp::<1>::default()),
+            Box::new(PhonyOp::<0>::default()),
         ];
-        let this = Default::default();
-        let tape = TensorTape { this, ops };
+        let tape = TensorTape {
+            ops,
+            ..Default::default()
+        };
         cpu.execute(tape);
 
         tokio::time::sleep(Duration::from_secs(1)).await;

@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use super::{Backend, BackendOp};
 use crate::loom::{
-    ops::{Access, TensorIr, TensorOp},
+    ops::{Access, TensorIr, TensorOp, TensorOpId},
     tensor::TensorId,
 };
 
@@ -160,6 +160,11 @@ impl TensorOp for AllocOp {
     }
 
     #[inline]
+    fn id(&self) -> TensorOpId {
+        self.op.id()
+    }
+
+    #[inline]
     fn io(&self) -> Vec<TensorIr> {
         self.io.clone()
     }
@@ -184,12 +189,13 @@ mod tests {
         device::{BackendOp, CpuBuilder, Device, cpu},
         layout::Layout,
         num::DataType,
-        ops::{Access, TensorIr, TensorOp, TensorTape},
+        ops::{Access, TensorIr, TensorOp, TensorOpId, TensorTape},
         tensor::TensorId,
     };
 
     #[derive(Debug, Clone)]
     struct PhonyBinaryOp {
+        id: TensorOpId,
         input: [TensorIr; 2],
         output: TensorIr,
     }
@@ -197,6 +203,10 @@ mod tests {
     impl TensorOp for PhonyBinaryOp {
         fn name(&self) -> Cow<'static, str> {
             Cow::Borrowed("BinaryOp")
+        }
+
+        fn id(&self) -> TensorOpId {
+            self.id
         }
 
         fn io(&self) -> Vec<TensorIr> {
@@ -220,6 +230,7 @@ mod tests {
 
     #[derive(Debug, Clone)]
     struct PhonyUnaryOp {
+        id: TensorOpId,
         input: TensorIr,
         output: TensorIr,
     }
@@ -227,6 +238,10 @@ mod tests {
     impl TensorOp for PhonyUnaryOp {
         fn name(&self) -> Cow<'static, str> {
             Cow::Borrowed("UnaryOp")
+        }
+
+        fn id(&self) -> TensorOpId {
+            self.id
         }
 
         fn io(&self) -> Vec<TensorIr> {
@@ -265,6 +280,7 @@ mod tests {
 
         let ops: Vec<Box<dyn TensorOp>> = vec![
             Box::new(PhonyBinaryOp {
+                id: Default::default(),
                 input: [
                     TensorIr {
                         layout: Layout::from_shape([32]),
@@ -290,6 +306,7 @@ mod tests {
                 },
             }),
             Box::new(PhonyBinaryOp {
+                id: Default::default(),
                 input: [
                     TensorIr {
                         layout: Layout::from_shape([32]),
@@ -315,6 +332,7 @@ mod tests {
                 },
             }),
             Box::new(PhonyBinaryOp {
+                id: Default::default(),
                 input: [
                     TensorIr {
                         layout: Layout::from_shape([32]),
@@ -340,6 +358,7 @@ mod tests {
                 },
             }),
             Box::new(PhonyUnaryOp {
+                id: Default::default(),
                 input: TensorIr {
                     layout: Layout::from_shape([32]),
                     r#type: DataType::F32x4,
@@ -357,7 +376,11 @@ mod tests {
             }),
         ];
         let this = ID_MAP[5];
-        let tape = TensorTape { this, ops };
+        let tape = TensorTape {
+            this,
+            ops,
+            ..Default::default()
+        };
         cpu.execute(tape);
 
         tokio::time::sleep(Duration::from_secs(1)).await;

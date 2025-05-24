@@ -111,7 +111,7 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
     pub fn zeros(device: Arc<D>, layout: impl IntoLayout) -> Self {
         let layout = layout.into_layout();
         let id = TensorId(uuid::Uuid::new_v4());
-        let tape = TensorTape::new(id).into();
+        let tape = TensorTape::default().into();
         let phantom = PhantomData;
         Self {
             device,
@@ -128,7 +128,7 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
         let device = self.device.clone();
         let layout = self.layout();
         let id = TensorId(uuid::Uuid::new_v4());
-        let tape = TensorTape::new(id).into();
+        let tape = TensorTape::default().into();
         let phantom = PhantomData;
         Self {
             device,

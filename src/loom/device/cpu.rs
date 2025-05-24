@@ -30,7 +30,7 @@ impl super::Backend for Backend {
 #[derive(Debug, Clone)]
 pub struct Cpu {
     /// The unique identifier of the device.
-    id: uid::Id<DeviceId>,
+    id: DeviceId,
     /// Sends ops to execute to the backend.
     sender: flume::Sender<TensorTape>,
 }
@@ -52,7 +52,7 @@ impl CpuBuilder {
     }
 
     pub async fn build(self) -> Cpu {
-        let id = uid::Id::new();
+        let id = Default::default();
         let ops = Arc::new(self.ops);
 
         let (sender, receiver) = flume::unbounded();
