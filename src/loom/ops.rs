@@ -65,8 +65,11 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
 pub struct TensorOpId(uid::Id<TensorOpId>);
 
 pub trait TensorOp: DynClone + Send + Sync + Any {
-    /// Name of the op.
-    fn name(&self) -> Cow<'static, str>;
+    /// Name of the op, by default it's the type name.
+    fn name(&self) -> Cow<'static, str> {
+        Cow::Borrowed(std::any::type_name::<Self>())
+    }
+
     /// Id of the op.
     fn id(&self) -> TensorOpId;
     /// Input and output tensors of the op.
@@ -100,6 +103,7 @@ impl std::fmt::Debug for dyn TensorOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TensorOp")
             .field("name", &self.name())
+            .field("id", &self.id())
             .field("io", &self.io())
             .finish()
     }

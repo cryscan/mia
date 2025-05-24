@@ -180,7 +180,7 @@ impl<B: Backend> BackendOp<AllocOp> for B {
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(test)]
 mod tests {
-    use std::{borrow::Cow, time::Duration};
+    use std::time::Duration;
 
     use anyhow::Result;
     use itertools::Itertools;
@@ -193,6 +193,27 @@ mod tests {
         tensor::TensorId,
     };
 
+    fn check_ir(x: TensorIr, y: TensorIr) {
+        println!(
+            "{:<12}{:<8}{:<4}{}\t→\t{:<12}{:<8}{}",
+            format!("{}", x.access),
+            format!("{}", x.r#type),
+            x.count,
+            x.id,
+            format!("{}", y.access),
+            format!("{}", y.r#type),
+            y.id
+        );
+
+        // 1. data sizes must match
+        assert_eq!(x.data_size(), y.data_size());
+
+        // 2. types must match in the case of `ReadWrite`
+        if matches!(y.access, Access::ReadWrite) {
+            assert_eq!(x.r#type, y.r#type);
+        }
+    }
+
     #[derive(Debug, Clone)]
     struct PhonyBinaryOp {
         id: TensorOpId,
@@ -201,10 +222,6 @@ mod tests {
     }
 
     impl TensorOp for PhonyBinaryOp {
-        fn name(&self) -> Cow<'static, str> {
-            Cow::Borrowed("BinaryOp")
-        }
-
         fn id(&self) -> TensorOpId {
             self.id
         }
@@ -221,9 +238,10 @@ mod tests {
     impl BackendOp<PhonyBinaryOp> for cpu::Backend {
         fn execute(&self, op: PhonyBinaryOp, io: Vec<TensorIr>) {
             println!("{}", op.name());
-            for (x, y) in op.io().into_iter().zip_eq(io) {
-                println!("{}\t{}\t→\t{}\t{}", x.access, x.id, y.access, y.id);
-            }
+            op.io()
+                .into_iter()
+                .zip_eq(io)
+                .for_each(|(x, y)| check_ir(x, y));
             println!()
         }
     }
@@ -236,10 +254,6 @@ mod tests {
     }
 
     impl TensorOp for PhonyUnaryOp {
-        fn name(&self) -> Cow<'static, str> {
-            Cow::Borrowed("UnaryOp")
-        }
-
         fn id(&self) -> TensorOpId {
             self.id
         }
@@ -252,9 +266,10 @@ mod tests {
     impl BackendOp<PhonyUnaryOp> for cpu::Backend {
         fn execute(&self, op: PhonyUnaryOp, io: Vec<TensorIr>) {
             println!("{}", op.name());
-            for (x, y) in op.io().into_iter().zip_eq(io) {
-                println!("{}\t{}\t→\t{}\t{}", x.access, x.id, y.access, y.id);
-            }
+            op.io()
+                .into_iter()
+                .zip_eq(io)
+                .for_each(|(x, y)| check_ir(x, y));
             println!()
         }
     }

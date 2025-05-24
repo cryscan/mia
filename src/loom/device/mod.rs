@@ -36,7 +36,7 @@ type OpVTable<B> = HashMap<TypeId, fn(&B, Box<dyn TensorOp>, Vec<TensorIr>)>;
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(test)]
 mod tests {
-    use std::{borrow::Cow, time::Duration};
+    use std::time::Duration;
 
     use super::{BackendOp, CpuBuilder, Device, cpu};
     use crate::loom::ops::{TensorIr, TensorOp, TensorOpId, TensorTape};
@@ -47,10 +47,6 @@ mod tests {
         struct PhonyOp<const N: usize>(TensorOpId);
 
         impl<const N: usize> TensorOp for PhonyOp<N> {
-            fn name(&self) -> Cow<'static, str> {
-                Cow::from(std::any::type_name::<Self>())
-            }
-
             fn id(&self) -> TensorOpId {
                 self.0
             }
