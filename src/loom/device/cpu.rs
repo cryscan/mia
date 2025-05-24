@@ -4,7 +4,7 @@ use std::{
 };
 
 use super::{
-    BackendOp, Device, DeviceId, OpVTable,
+    BackendOp, Device, DeviceEvent, DeviceId, OpVTable,
     allocator::{AllocOp, Allocator},
 };
 use crate::loom::ops::{TensorIr, TensorOp, TensorTape};
@@ -32,12 +32,12 @@ pub struct Cpu {
     /// The unique identifier of the device.
     id: DeviceId,
     /// Sends ops to execute to the backend.
-    sender: flume::Sender<TensorTape>,
+    sender: flume::Sender<DeviceEvent>,
 }
 
 impl Device for Cpu {
-    fn execute(&self, tape: TensorTape) {
-        let _ = self.sender.send(tape);
+    fn execute(&self, event: DeviceEvent) {
+        let _ = self.sender.send(event);
     }
 }
 
@@ -80,12 +80,16 @@ impl CpuBuilder {
     }
 }
 
-async fn run(backend: Backend, receiver: flume::Receiver<TensorTape>) {
-    while let Ok(tape) = receiver.recv_async().await {
-        let this = tape.this;
-        match execute_tape(&backend, tape) {
-            Ok(_) => log::info!("{this}"),
-            Err(err) => log::error!("{err}"),
+async fn run(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
+    while let Ok(event) = receiver.recv_async().await {
+        match event {
+            DeviceEvent::Execute(tape) | DeviceEvent::ExecuteRead(tape, _) => {
+                let this = tape.this;
+                match execute_tape(&backend, tape) {
+                    Ok(_) => log::info!("[run] {this}"),
+                    Err(err) => log::error!("[run] {err}"),
+                }
+            }
         }
     }
 }

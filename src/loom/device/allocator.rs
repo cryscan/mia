@@ -186,7 +186,7 @@ mod tests {
     use itertools::Itertools;
 
     use crate::loom::{
-        device::{BackendOp, CpuBuilder, Device, cpu},
+        device::{BackendOp, CpuBuilder, Device, DeviceEvent, cpu},
         layout::Layout,
         num::DataType,
         ops::{Access, TensorIr, TensorOp, TensorOpId, TensorTape},
@@ -391,12 +391,8 @@ mod tests {
             }),
         ];
         let this = ID_MAP[5];
-        let tape = TensorTape {
-            this,
-            ops,
-            ..Default::default()
-        };
-        cpu.execute(tape);
+        let tape = TensorTape { this, ops };
+        cpu.execute(DeviceEvent::Execute(tape));
 
         tokio::time::sleep(Duration::from_secs(1)).await;
         Ok(())

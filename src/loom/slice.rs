@@ -7,9 +7,9 @@ use itertools::Itertools;
 use super::{
     device::Device,
     layout::Layout,
+    num::Scalar,
     tensor::{Tensor, TensorError},
 };
-use crate::loom::num::Scalar;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Display)]
 pub enum Axis {

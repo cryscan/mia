@@ -114,8 +114,6 @@ impl std::fmt::Debug for dyn TensorOp {
 pub struct TensorTape {
     /// The ID of the tensor itself.
     pub this: TensorId,
-    /// The interface to report results back.
-    pub report: Option<flume::Sender<Box<[u8]>>>,
     /// Operators the tensor has experienced.
     pub ops: Vec<Box<dyn TensorOp>>,
 }

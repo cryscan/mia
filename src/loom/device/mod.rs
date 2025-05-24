@@ -17,7 +17,13 @@ pub struct DeviceId(uid::Id<DeviceId>);
 
 pub trait Device {
     /// Dynamically dispatch to actual `op`'s execution, using `op`'s own `io`.
-    fn execute(&self, tape: TensorTape);
+    fn execute(&self, event: DeviceEvent);
+}
+
+#[derive(Debug, Clone)]
+pub enum DeviceEvent {
+    Execute(TensorTape),
+    ExecuteRead(TensorTape, flume::Sender<Box<[u8]>>),
 }
 
 /// Implemented for each [`Device`] for each [`TensorOp`].
@@ -38,7 +44,7 @@ type OpVTable<B> = HashMap<TypeId, fn(&B, Box<dyn TensorOp>, Vec<TensorIr>)>;
 mod tests {
     use std::time::Duration;
 
-    use super::{BackendOp, CpuBuilder, Device, cpu};
+    use super::{BackendOp, CpuBuilder, Device, DeviceEvent, cpu};
     use crate::loom::ops::{TensorIr, TensorOp, TensorOpId, TensorTape};
 
     #[tokio::test]
@@ -75,11 +81,9 @@ mod tests {
             Box::new(PhonyOp::<1>::default()),
             Box::new(PhonyOp::<0>::default()),
         ];
-        let tape = TensorTape {
-            ops,
-            ..Default::default()
-        };
-        cpu.execute(tape);
+        let this = Default::default();
+        let tape = TensorTape { this, ops };
+        cpu.execute(DeviceEvent::Execute(tape));
 
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
