@@ -100,6 +100,7 @@ impl std::fmt::Debug for dyn TensorOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TensorOp")
             .field("name", &self.name())
+            .field("id", &self.id())
             .field("io", &self.io())
             .finish()
     }

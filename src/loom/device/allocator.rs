@@ -193,6 +193,26 @@ mod tests {
         tensor::TensorId,
     };
 
+    fn check_ir(x: TensorIr, y: TensorIr) {
+        println!(
+            "{:<12}{:<8}{:<4}\t{}\t→\t{:<12}{}",
+            format!("{}", x.access),
+            format!("{}", x.r#type),
+            x.count,
+            x.id,
+            format!("{}", y.access),
+            y.id
+        );
+
+        // 1. data sizes must match
+        assert_eq!(x.data_size(), y.data_size());
+
+        // 2. types must match in the case of `ReadWrite`
+        if matches!(y.access, Access::ReadWrite) {
+            assert_eq!(x.r#type, y.r#type);
+        }
+    }
+
     #[derive(Debug, Clone)]
     struct PhonyBinaryOp {
         id: TensorOpId,
@@ -221,9 +241,10 @@ mod tests {
     impl BackendOp<PhonyBinaryOp> for cpu::Backend {
         fn execute(&self, op: PhonyBinaryOp, io: Vec<TensorIr>) {
             println!("{}", op.name());
-            for (x, y) in op.io().into_iter().zip_eq(io) {
-                println!("{}\t{}\t→\t{}\t{}", x.access, x.id, y.access, y.id);
-            }
+            op.io()
+                .into_iter()
+                .zip_eq(io)
+                .for_each(|(x, y)| check_ir(x, y));
             println!()
         }
     }
@@ -252,9 +273,10 @@ mod tests {
     impl BackendOp<PhonyUnaryOp> for cpu::Backend {
         fn execute(&self, op: PhonyUnaryOp, io: Vec<TensorIr>) {
             println!("{}", op.name());
-            for (x, y) in op.io().into_iter().zip_eq(io) {
-                println!("{}\t{}\t→\t{}\t{}", x.access, x.id, y.access, y.id);
-            }
+            op.io()
+                .into_iter()
+                .zip_eq(io)
+                .for_each(|(x, y)| check_ir(x, y));
             println!()
         }
     }
