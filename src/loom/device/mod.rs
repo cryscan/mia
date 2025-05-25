@@ -2,8 +2,12 @@ use std::any::TypeId;
 
 use derive_more::{Deref, DerefMut};
 use rustc_hash::FxHashMap as HashMap;
+use thiserror::Error;
 
-use super::ops::{TensorIr, TensorOp, TensorTape};
+use super::{
+    ops::{TensorIr, TensorOp, TensorTape},
+    tensor::TensorId,
+};
 
 pub use cpu::{Cpu, CpuBuilder};
 pub use gpu::{Gpu, GpuBuilder};
@@ -20,10 +24,27 @@ pub trait Device {
     fn execute(&self, event: DeviceEvent);
 }
 
+#[derive(Debug, Error)]
+pub enum DeviceError {
+    #[error("failed to allocate tensor")]
+    Alloc(#[from] allocator::AllocError),
+}
+
+pub struct DeviceBack {
+    pub id: TensorId,
+    pub data: Box<[u8]>,
+}
+
 #[derive(Debug, Clone)]
 pub enum DeviceEvent {
-    Execute(TensorTape),
-    ExecuteRead(TensorTape, flume::Sender<Box<[u8]>>),
+    Execute {
+        tape: TensorTape,
+        sender: flume::Sender<Result<TensorId, DeviceError>>,
+    },
+    ExecuteBack {
+        tape: TensorTape,
+        sender: flume::Sender<Result<DeviceBack, DeviceError>>,
+    },
 }
 
 /// Implemented for each [`Device`] for each [`TensorOp`].
@@ -42,13 +63,13 @@ type OpVTable<B> = HashMap<TypeId, fn(&B, Box<dyn TensorOp>, Vec<TensorIr>)>;
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::error::Error;
 
     use super::{BackendOp, CpuBuilder, Device, DeviceEvent, cpu};
     use crate::loom::ops::{TensorIr, TensorOp, TensorOpId, TensorTape};
 
     #[tokio::test]
-    async fn test_add_op() {
+    async fn test_add_op() -> Result<(), Box<dyn Error>> {
         #[derive(Debug, Default, Clone)]
         struct PhonyOp<const N: usize>(TensorOpId);
 
@@ -81,10 +102,12 @@ mod tests {
             Box::new(PhonyOp::<1>::default()),
             Box::new(PhonyOp::<0>::default()),
         ];
-        let this = Default::default();
-        let tape = TensorTape { this, ops };
-        cpu.execute(DeviceEvent::Execute(tape));
+        let id = Default::default();
+        let tape = TensorTape { id, ops };
+        let (sender, receiver) = flume::bounded(1);
+        cpu.execute(DeviceEvent::Execute { tape, sender });
 
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        let _ = receiver.recv_async().await??;
+        Ok(())
     }
 }

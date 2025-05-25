@@ -3,11 +3,16 @@ use std::{
     sync::Arc,
 };
 
+use rustc_hash::FxHashSet as HashSet;
+
 use super::{
-    BackendOp, Device, DeviceEvent, DeviceId, OpVTable,
+    BackendOp, Device, DeviceError, DeviceEvent, DeviceId, OpVTable,
     allocator::{AllocOp, Allocator},
 };
-use crate::loom::ops::{TensorIr, TensorOp, TensorTape};
+use crate::loom::{
+    ops::{TensorIr, TensorOp, TensorOpId, TensorTape},
+    tensor::TensorId,
+};
 
 #[derive(Debug, Clone)]
 pub struct Backend {
@@ -81,29 +86,35 @@ impl CpuBuilder {
 }
 
 async fn run(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
+    let mut commit = HashSet::default();
     while let Ok(event) = receiver.recv_async().await {
         match event {
-            DeviceEvent::Execute(tape) | DeviceEvent::ExecuteRead(tape, _) => {
-                let this = tape.this;
-                match execute_tape(&backend, tape) {
-                    Ok(_) => log::info!("[run] {this}"),
-                    Err(err) => log::error!("[run] {err}"),
-                }
+            DeviceEvent::Execute { tape, sender } => {
+                let result = execute_tape(&backend, &mut commit, tape);
+                let _ = sender.send(result);
             }
+            DeviceEvent::ExecuteBack { .. } => todo!(),
         }
     }
 }
 
-fn execute_tape(backend: &Backend, tape: TensorTape) -> Result<(), Box<dyn std::error::Error>> {
+fn execute_tape(
+    backend: &Backend,
+    commit: &mut HashSet<TensorOpId>,
+    tape: TensorTape,
+) -> Result<TensorId, DeviceError> {
     let mut allocator = Allocator::default();
     let ops = tape
         .ops
         .into_iter()
+        .filter(|op| !commit.contains(&op.id()))
         .map(|op| allocator.alloc(op))
         .collect::<Result<Vec<_>, _>>()?;
     for op in ops {
         let io = op.io();
+        let id = op.id();
         backend.execute(op, io);
+        commit.insert(id);
     }
-    Ok(())
+    Ok(tape.id)
 }

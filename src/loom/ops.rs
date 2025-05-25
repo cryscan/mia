@@ -113,14 +113,14 @@ impl std::fmt::Debug for dyn TensorOp {
 #[derive(Debug, Default, Clone)]
 pub struct TensorTape {
     /// The ID of the tensor itself.
-    pub this: TensorId,
+    pub id: TensorId,
     /// Operators the tensor has experienced.
     pub ops: Vec<Box<dyn TensorOp>>,
 }
 
 impl PartialEq for TensorTape {
     fn eq(&self, other: &Self) -> bool {
-        self.this == other.this
+        self.id == other.id
     }
 }
 

@@ -180,9 +180,8 @@ impl<B: Backend> BackendOp<AllocOp> for B {
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::error::Error;
 
-    use anyhow::Result;
     use itertools::Itertools;
 
     use crate::loom::{
@@ -286,7 +285,7 @@ mod tests {
     ];
 
     #[tokio::test]
-    async fn test_reuse() -> Result<()> {
+    async fn test_reuse() -> Result<(), Box<dyn Error>> {
         let cpu = CpuBuilder::new()
             .add_op::<PhonyBinaryOp>()
             .add_op::<PhonyUnaryOp>()
@@ -390,11 +389,12 @@ mod tests {
                 },
             }),
         ];
-        let this = ID_MAP[5];
-        let tape = TensorTape { this, ops };
-        cpu.execute(DeviceEvent::Execute(tape));
+        let id = ID_MAP[5];
+        let tape = TensorTape { id, ops };
+        let (sender, receiver) = flume::bounded(1);
+        cpu.execute(DeviceEvent::Execute { tape, sender });
 
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        let _ = receiver.recv_async().await??;
         Ok(())
     }
 }
