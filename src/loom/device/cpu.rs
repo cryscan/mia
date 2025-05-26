@@ -90,7 +90,7 @@ async fn run(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
     while let Ok(event) = receiver.recv_async().await {
         match event {
             DeviceEvent::Execute { tape, sender } => {
-                let result = execute_tape(&backend, &mut commit, tape);
+                let result = execute(&backend, &mut commit, tape);
                 let _ = sender.send(result);
             }
             DeviceEvent::ExecuteBack { .. } => todo!(),
@@ -98,19 +98,19 @@ async fn run(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
     }
 }
 
-fn execute_tape(
+fn execute(
     backend: &Backend,
     commit: &mut HashSet<TensorOpId>,
     tape: TensorTape,
 ) -> Result<TensorId, DeviceError> {
     let mut allocator = Allocator::default();
-    let ops = tape
+    let ops: Vec<_> = tape
         .ops
         .into_iter()
         .filter(|op| !commit.contains(&op.id()))
-        .map(|op| allocator.alloc(op))
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect();
     for op in ops {
+        let op = allocator.alloc(op)?;
         let io = op.io();
         let id = op.id();
         backend.execute(op, io);

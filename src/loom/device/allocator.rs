@@ -118,10 +118,13 @@ impl Allocator {
             ir.borrow_mut().id = self.redirect(id);
         }
 
-        // 6. update the free list
+        // 6. release freed ids and update the free list
         for ir in free {
-            let size = ir.borrow().data_size();
             let id = ir.borrow().id;
+            let size = ir.borrow().data_size();
+
+            self.alloc.retain(|_, &mut x| x != id);
+
             let mut ids = self.free.remove(&size).unwrap_or_default();
             ids.push_back(id);
             self.free.insert(size, ids);
