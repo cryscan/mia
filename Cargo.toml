@@ -64,7 +64,8 @@ wasm-bindgen-futures = "0.4"
 wgpu = "25.0"
 
 [dependencies.mia-derive]
-path = "crates/mia_derive"
+version = "0.0"
+# path = "crates/mia_derive"
 
 [dependencies.tokio]
 default-features = false
