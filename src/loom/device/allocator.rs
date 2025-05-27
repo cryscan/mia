@@ -4,9 +4,9 @@ use itertools::Itertools;
 use rustc_hash::FxHashMap as HashMap;
 use thiserror::Error;
 
-use super::{Backend, BackendOp};
+use super::Backend;
 use crate::loom::{
-    ops::{Access, TensorIr, TensorOp, TensorOpId},
+    ops::{Access, BackendOp, TensorIr, TensorOp, TensorOpId},
     tensor::TensorId,
 };
 
@@ -173,10 +173,9 @@ impl TensorOp for AllocOp {
     }
 }
 
-impl<B: Backend> BackendOp<AllocOp> for B {
-    #[inline]
-    fn execute(&self, op: AllocOp, io: Vec<TensorIr>) {
-        self.execute(op.op, io);
+impl<B: Backend> BackendOp<B> for AllocOp {
+    fn execute(&self, backend: &B, io: Vec<TensorIr>) {
+        backend.execute(self.op.as_ref(), io);
     }
 }
 
@@ -188,10 +187,10 @@ mod tests {
     use itertools::Itertools;
 
     use crate::loom::{
-        device::{BackendOp, CpuBuilder, Device, DeviceEvent, cpu},
+        device::{CpuBuilder, Device, DeviceEvent, cpu},
         layout::Layout,
         num::DataType,
-        ops::{Access, TensorIr, TensorOp, TensorOpId, TensorTape},
+        ops::{Access, BackendOp, TensorIr, TensorOp, TensorOpId, TensorTape},
         tensor::TensorId,
     };
 
@@ -237,14 +236,14 @@ mod tests {
         }
     }
 
-    impl BackendOp<PhonyBinaryOp> for cpu::Backend {
-        fn execute(&self, op: PhonyBinaryOp, io: Vec<TensorIr>) {
-            println!("{}", op.name());
-            op.io()
+    impl BackendOp<cpu::Backend> for PhonyBinaryOp {
+        fn execute(&self, _backend: &cpu::Backend, io: Vec<TensorIr>) {
+            println!("{}", self.name());
+            self.io()
                 .into_iter()
                 .zip_eq(io)
                 .for_each(|(x, y)| check_ir(x, y));
-            println!()
+            println!();
         }
     }
 
@@ -265,14 +264,14 @@ mod tests {
         }
     }
 
-    impl BackendOp<PhonyUnaryOp> for cpu::Backend {
-        fn execute(&self, op: PhonyUnaryOp, io: Vec<TensorIr>) {
-            println!("{}", op.name());
-            op.io()
+    impl BackendOp<cpu::Backend> for PhonyUnaryOp {
+        fn execute(&self, _backend: &cpu::Backend, io: Vec<TensorIr>) {
+            println!("{}", self.name());
+            self.io()
                 .into_iter()
                 .zip_eq(io)
                 .for_each(|(x, y)| check_ir(x, y));
-            println!()
+            println!();
         }
     }
 

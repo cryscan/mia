@@ -1,16 +1,13 @@
-use std::{
-    any::{Any, TypeId},
-    sync::Arc,
-};
+use std::{any::TypeId, sync::Arc};
 
 use rustc_hash::FxHashSet as HashSet;
 
 use super::{
-    BackendOp, Device, DeviceError, DeviceEvent, DeviceId, OpVTable,
+    Backend as _, Device, DeviceError, DeviceEvent, DeviceId, OpVTable,
     allocator::{AllocOp, Allocator},
 };
 use crate::loom::{
-    ops::{TensorIr, TensorOp, TensorOpId, TensorTape},
+    ops::{BackendOp, TensorIr, TensorOp, TensorOpId, TensorTape},
     tensor::TensorId,
 };
 
@@ -22,8 +19,8 @@ pub struct Backend {
 
 impl super::Backend for Backend {
     #[inline]
-    fn execute(&self, op: Box<dyn TensorOp>, io: Vec<TensorIr>) {
-        let id = &op.as_ref().type_id();
+    fn execute(&self, op: &dyn TensorOp, io: Vec<TensorIr>) {
+        let id = &op.type_id();
         match self.ops.get(id) {
             Some(f) => f(self, op, io),
             None => log::error!("unable to execute op of type {}", op.name()),
@@ -70,15 +67,11 @@ impl CpuBuilder {
         Cpu { id, sender }
     }
 
-    pub fn add_op<Op>(mut self) -> Self
-    where
-        Op: TensorOp,
-        Backend: BackendOp<Op>,
-    {
+    pub fn add_op<Op: TensorOp + BackendOp<Backend>>(mut self) -> Self {
         let id = TypeId::of::<Op>();
-        let f = |b: &Backend, op: Box<dyn TensorOp>, io| match Box::<dyn Any>::from(op).downcast() {
-            Ok(op) => b.execute(*op, io),
-            Err(_) => unreachable!(),
+        let f = |backend: &Backend, op: &dyn TensorOp, io| match op.downcast_ref::<Op>() {
+            Some(op) => op.execute(backend, io),
+            None => unreachable!(),
         };
         self.ops.insert(id, f);
         self
@@ -113,7 +106,7 @@ fn execute(
         let op = allocator.alloc(op)?;
         let io = op.io();
         let id = op.id();
-        backend.execute(op, io);
+        backend.execute(&op, io);
         commit.insert(id);
     }
     Ok(tape.id)

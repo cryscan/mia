@@ -7,7 +7,7 @@ use dyn_clone::DynClone;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    device::Device,
+    device::{Backend, Device},
     layout::Layout,
     num::{DataType, Scalar},
     tensor::{Tensor, TensorId},
@@ -96,13 +96,6 @@ impl std::ops::DerefMut for dyn TensorOp {
     }
 }
 
-impl From<Box<dyn TensorOp>> for Box<dyn Any> {
-    fn from(value: Box<dyn TensorOp>) -> Self {
-        let value = Box::leak(value);
-        unsafe { Box::from_raw(value as *mut dyn Any) }
-    }
-}
-
 impl std::fmt::Debug for dyn TensorOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TensorOp")
@@ -111,6 +104,11 @@ impl std::fmt::Debug for dyn TensorOp {
             .field("io", &self.io())
             .finish()
     }
+}
+
+/// Implemented for each [`Device`] for each [`TensorOp`].
+pub trait BackendOp<B: Backend> {
+    fn execute(&self, backend: &B, io: Vec<TensorIr>);
 }
 
 /// Records operators a tensor has experienced.

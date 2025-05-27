@@ -47,26 +47,20 @@ pub enum DeviceEvent {
     },
 }
 
-/// Implemented for each [`Device`] for each [`TensorOp`].
-pub trait BackendOp<Op: TensorOp> {
-    /// Statically dispatch to actual `op`'s execution, using given `io`.
-    fn execute(&self, op: Op, io: Vec<TensorIr>);
-}
-
 pub trait Backend: Send + Sync {
     /// Dynamically dispatch to actual `op`'s execution, using given `io`.
-    fn execute(&self, op: Box<dyn TensorOp>, io: Vec<TensorIr>);
+    fn execute(&self, op: &dyn TensorOp, io: Vec<TensorIr>);
 }
 
-type OpVTable<B> = HashMap<TypeId, fn(&B, Box<dyn TensorOp>, Vec<TensorIr>)>;
+type OpVTable<B> = HashMap<TypeId, fn(&B, &dyn TensorOp, Vec<TensorIr>)>;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(test)]
 mod tests {
     use std::error::Error;
 
-    use super::{BackendOp, CpuBuilder, Device, DeviceEvent, cpu};
-    use crate::loom::ops::{TensorIr, TensorOp, TensorOpId, TensorTape};
+    use super::{CpuBuilder, Device, DeviceEvent, cpu};
+    use crate::loom::ops::{BackendOp, TensorIr, TensorOp, TensorOpId, TensorTape};
 
     #[tokio::test]
     async fn test_add_op() -> Result<(), Box<dyn Error>> {
@@ -83,9 +77,9 @@ mod tests {
             }
         }
 
-        impl<const N: usize> BackendOp<PhonyOp<N>> for cpu::Backend {
-            fn execute(&self, op: PhonyOp<N>, _io: Vec<TensorIr>) {
-                println!("{}", op.name());
+        impl<const N: usize> BackendOp<cpu::Backend> for PhonyOp<N> {
+            fn execute(&self, _backend: &cpu::Backend, _io: Vec<TensorIr>) {
+                println!("{}", self.name())
             }
         }
 
