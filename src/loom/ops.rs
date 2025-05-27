@@ -2,6 +2,8 @@ use std::{any::Any, borrow::Cow};
 
 use derive_more::{Deref, DerefMut, Display};
 use dyn_clone::DynClone;
+
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -11,14 +13,16 @@ use super::{
     tensor::{Tensor, TensorId},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Display, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Display)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Access {
     ReadOnly,
     ReadWrite,
     WriteOnly,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TensorIr {
     pub layout: Layout,
     pub r#type: DataType,

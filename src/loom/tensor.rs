@@ -1,8 +1,10 @@
 use std::{marker::PhantomData, sync::Arc};
 
 use derive_more::Display;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use super::{
     device::Device,
@@ -26,8 +28,9 @@ pub enum TensorError {
     Slice(Layout, Slice),
 }
 
-#[derive(Debug, Default, Display, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Default, Display, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 #[repr(transparent)]
 pub struct TensorId(pub uuid::Uuid);
 

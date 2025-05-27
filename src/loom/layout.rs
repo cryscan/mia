@@ -2,8 +2,10 @@ use std::sync::Arc;
 
 use derive_more::{Deref, DerefMut, Display, From, Into};
 use itertools::Itertools;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Error)]
 pub enum LayoutError {
@@ -30,21 +32,8 @@ pub trait Compose<F> {
     fn compose(&self, f: F) -> Self::Output;
 }
 
-#[derive(
-    Debug,
-    Default,
-    Clone,
-    PartialEq,
-    Eq,
-    Hash,
-    Deref,
-    DerefMut,
-    From,
-    Into,
-    Display,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into, Display)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[display("{_0:?}")]
 pub struct Shape(Arc<[usize]>);
 
@@ -209,21 +198,8 @@ impl Shape {
 }
 
 /// Defines the step to add to when increase 1 along coordinates.
-#[derive(
-    Debug,
-    Default,
-    Clone,
-    PartialEq,
-    Eq,
-    Hash,
-    Deref,
-    DerefMut,
-    From,
-    Into,
-    Display,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into, Display)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[display("{_0:?}")]
 pub struct Stride(Arc<[usize]>);
 
@@ -262,21 +238,8 @@ impl Stride {
 }
 
 /// A multi-dimensional coordinate.
-#[derive(
-    Debug,
-    Default,
-    Clone,
-    PartialEq,
-    Eq,
-    Hash,
-    Deref,
-    DerefMut,
-    From,
-    Into,
-    Display,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into, Display)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[display("{_0:?}")]
 pub struct Coord(Arc<[usize]>);
 
@@ -319,21 +282,8 @@ impl Coord {
 /// For more information, check:
 /// 1. [CuTe documents](https://github.com/NVIDIA/cutlass/blob/main/media/docs/cute);
 /// 2. [A note on the algebra of CuTe Layouts](https://leimao.github.io/downloads/article/2024-10-20-CuTe-Layout-Algebra/layout_algebra.pdf).
-#[derive(
-    Debug,
-    Default,
-    Clone,
-    PartialEq,
-    Eq,
-    Hash,
-    Deref,
-    DerefMut,
-    From,
-    Into,
-    Display,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into, Display)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[display("<{}, {}>", self.shape(), self.stride())]
 pub struct Layout(Arc<[(usize, usize)]>);
 
@@ -742,7 +692,8 @@ impl<T: AsRef<Layout>> Compose<T> for Layout {
 
 /// A swizzle functor.
 /// See [CuTe documentation](https://github.com/NVIDIA/cutlass/blob/main/include/cute/swizzle.hpp#L44) for more info.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Swizzle {
     pub base: usize,
     pub bits: usize,
@@ -770,7 +721,8 @@ impl Compose<Swizzle> for Layout {
 }
 
 /// Composition of 2 (possibly different types of) index functions `t` and `f`, i.e., `f ∘ t`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ComposedFn<T, F>(pub T, pub F);
 
 impl<T, F, I, J, K> IndexFn<I> for ComposedFn<T, F>

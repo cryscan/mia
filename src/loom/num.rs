@@ -1,10 +1,13 @@
 use bytemuck::{Pod, Zeroable};
 use derive_more::{Deref, DerefMut, Display, From, Into};
 use half::f16;
-use serde::{Deserialize, Serialize};
 use u4::AsNibbles;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display, Serialize, Deserialize)]
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DataType {
     F32,
     F16,
@@ -66,8 +69,9 @@ macro_rules! impl_display {
     };
 }
 
-#[derive(Debug, Default, Clone, Copy, Deref, DerefMut, From, Into, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Default, Clone, Copy, Deref, DerefMut, From, Into)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 #[repr(C)]
 pub struct U4x8(pub AsNibbles<[u8; 4]>);
 
@@ -83,8 +87,9 @@ impl From<U4x8> for u32 {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, Deref, DerefMut, From, Into, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Default, Clone, Copy, Deref, DerefMut, From, Into)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 #[repr(C)]
 pub struct U8x4(pub [u8; 4]);
 
@@ -100,13 +105,15 @@ impl From<U8x4> for u32 {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, Deref, DerefMut, From, Into, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Default, Clone, Copy, Deref, DerefMut, From, Into)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 #[repr(C)]
 pub struct F32x4(pub [f32; 4]);
 
-#[derive(Debug, Default, Clone, Copy, Deref, DerefMut, From, Into, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Default, Clone, Copy, Deref, DerefMut, From, Into)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 #[repr(C)]
 pub struct F16x4(pub [f16; 4]);
 
