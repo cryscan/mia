@@ -1,6 +1,9 @@
-use std::{any::TypeId, sync::Arc};
+use std::{
+    any::TypeId,
+    sync::{Arc, Mutex},
+};
 
-use rustc_hash::FxHashSet as HashSet;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use thiserror::Error;
 
 use super::{
@@ -16,11 +19,13 @@ use crate::loom::{
 #[derive(Debug, Clone)]
 pub struct Backend {
     /// Handle to a WebGPU compute device.
-    pub device: wgpu::Device,
+    device: wgpu::Device,
     /// The WebGPU command queue.
-    pub queue: wgpu::Queue,
+    queue: wgpu::Queue,
     /// Operators that the device is able to execute.
     ops: Arc<OpVTable<Self>>,
+    /// Pool of GPU buffers.
+    buffers: Arc<Mutex<HashMap<TensorId, wgpu::Buffer>>>,
 }
 
 impl super::Backend for Backend {
@@ -34,15 +39,23 @@ impl super::Backend for Backend {
     }
 }
 
+impl Backend {
+    #[inline]
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    #[inline]
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+}
+
 #[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct Gpu {
     /// The unique identifier of the device.
     id: DeviceId,
-    /// Handle to a WebGPU compute device.
-    device: wgpu::Device,
-    /// The WebGPU command queue.
-    queue: wgpu::Queue,
     /// Sends ops to execute to the backend.
     sender: flume::Sender<DeviceEvent>,
 }
@@ -101,26 +114,23 @@ impl GpuBuilder {
             })
             .await?;
 
-        let id = Default::default();
         let ops = Arc::new(ops);
+        let buffers = Arc::new(Mutex::new(Default::default()));
 
         let (sender, receiver) = flume::unbounded();
-        let backend = {
-            let device = device.clone();
-            let queue = queue.clone();
-            Backend { ops, device, queue }
+        let backend = Backend {
+            ops,
+            device,
+            queue,
+            buffers,
         };
         #[cfg(not(target_arch = "wasm32"))]
         tokio::spawn(run(backend, receiver));
         #[cfg(target_arch = "wasm32")]
         wasm_bindgen_futures::spawn_local(run(backend, receiver));
 
-        let device = Gpu {
-            id,
-            device,
-            queue,
-            sender,
-        };
+        let id = Default::default();
+        let device = Gpu { id, sender };
         Ok(device)
     }
 
