@@ -1,4 +1,4 @@
-use std::any::TypeId;
+use std::{any::TypeId, sync::Arc};
 
 use derive_more::{Deref, DerefMut};
 use rustc_hash::FxHashMap as HashMap;
@@ -28,11 +28,14 @@ pub trait Device {
 pub enum DeviceError {
     #[error("failed to allocate tensor")]
     Alloc(#[from] allocator::AllocError),
+    #[error("tensor not found: {0}")]
+    Tensor(TensorId),
 }
 
-pub struct DeviceBack {
+#[derive(Debug, Clone)]
+pub struct BackData {
     pub id: TensorId,
-    pub data: Box<[u8]>,
+    pub data: Arc<[u8]>,
 }
 
 #[derive(Debug, Clone)]
@@ -41,9 +44,9 @@ pub enum DeviceEvent {
         tape: TensorTape,
         sender: flume::Sender<Result<TensorId, DeviceError>>,
     },
-    ExecuteBack {
+    Back {
         tape: TensorTape,
-        sender: flume::Sender<Result<DeviceBack, DeviceError>>,
+        sender: flume::Sender<Result<BackData, DeviceError>>,
     },
 }
 

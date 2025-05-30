@@ -1,20 +1,26 @@
-use std::{any::TypeId, sync::Arc};
+use std::{
+    any::TypeId,
+    sync::{Arc, RwLock},
+};
 
-use rustc_hash::FxHashSet as HashSet;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use super::{
-    Backend as _, Device, DeviceError, DeviceEvent, DeviceId, OpVTable,
+    BackData, Backend as _, Device, DeviceError, DeviceEvent, DeviceId, OpVTable,
     allocator::{AllocOp, Allocator},
 };
 use crate::loom::{
-    ops::{BackendOp, TensorIr, TensorOp, TensorOpId, TensorTape},
+    ops::{BackendOp, TensorIr, TensorOp, TensorTape},
     tensor::TensorId,
 };
 
+#[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct Backend {
     /// Operators that the device is able to execute.
     ops: Arc<OpVTable<Self>>,
+    /// Pool of CPU buffers.
+    buffers: Arc<RwLock<HashMap<TensorId, Arc<[u8]>>>>,
 }
 
 impl super::Backend for Backend {
@@ -54,16 +60,17 @@ impl CpuBuilder {
     }
 
     pub async fn build(self) -> Cpu {
-        let id = Default::default();
         let ops = Arc::new(self.ops);
+        let buffers = Arc::new(RwLock::new(HashMap::default()));
 
         let (sender, receiver) = flume::unbounded();
-        let backend = Backend { ops };
+        let backend = Backend { ops, buffers };
         #[cfg(not(target_arch = "wasm32"))]
         tokio::spawn(run(backend, receiver));
         #[cfg(target_arch = "wasm32")]
         wasm_bindgen_futures::spawn_local(run(backend, receiver));
 
+        let id = Default::default();
         Cpu { id, sender }
     }
 
@@ -80,34 +87,51 @@ impl CpuBuilder {
 
 async fn run(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
     let mut commit = HashSet::default();
+
+    let mut execute = |tape: TensorTape| {
+        let mut allocator = Allocator::default();
+        let ops: Vec<_> = tape
+            .ops
+            .into_iter()
+            .filter(|op| !commit.contains(&op.id()))
+            .collect();
+        for op in ops {
+            let op = allocator.alloc(op)?;
+            let io = op.io();
+            let id = op.id();
+            backend.execute(&op, io);
+            commit.insert(id);
+        }
+        Ok(tape.id)
+    };
+
     while let Ok(event) = receiver.recv_async().await {
         match event {
-            DeviceEvent::Execute { tape, sender } => {
-                let result = execute(&backend, &mut commit, tape);
-                let _ = sender.send(result);
+            DeviceEvent::Execute { tape, sender } => _ = sender.send(execute(tape)),
+            DeviceEvent::Back { tape, sender } => {
+                let id = match execute(tape) {
+                    Ok(id) => id,
+                    Err(err) => {
+                        let _ = sender.send(Err(err));
+                        continue;
+                    }
+                };
+                let backend = backend.clone();
+                let future = async move {
+                    let data = {
+                        let buffers = backend.buffers.read().expect("failed to lock");
+                        buffers.get(&id).cloned()
+                    };
+                    let result = data
+                        .map(|data| BackData { id, data })
+                        .ok_or(DeviceError::Tensor(id));
+                    let _ = sender.send(result);
+                };
+                #[cfg(not(target_arch = "wasm32"))]
+                tokio::spawn(future);
+                #[cfg(target_arch = "wasm32")]
+                wasm_bindgen_futures::spawn_local(future);
             }
-            DeviceEvent::ExecuteBack { .. } => todo!(),
         }
     }
-}
-
-fn execute(
-    backend: &Backend,
-    commit: &mut HashSet<TensorOpId>,
-    tape: TensorTape,
-) -> Result<TensorId, DeviceError> {
-    let mut allocator = Allocator::default();
-    let ops: Vec<_> = tape
-        .ops
-        .into_iter()
-        .filter(|op| !commit.contains(&op.id()))
-        .collect();
-    for op in ops {
-        let op = allocator.alloc(op)?;
-        let io = op.io();
-        let id = op.id();
-        backend.execute(&op, io);
-        commit.insert(id);
-    }
-    Ok(tape.id)
 }

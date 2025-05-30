@@ -7,11 +7,11 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use thiserror::Error;
 
 use super::{
-    Backend as _, Device, DeviceError, DeviceEvent, DeviceId, OpVTable,
+    Backend as _, Device, DeviceEvent, DeviceId, OpVTable,
     allocator::{AllocOp, Allocator},
 };
 use crate::loom::{
-    ops::{BackendOp, TensorIr, TensorOp, TensorOpId, TensorTape},
+    ops::{BackendOp, TensorIr, TensorOp, TensorTape},
     tensor::TensorId,
 };
 
@@ -115,7 +115,7 @@ impl GpuBuilder {
             .await?;
 
         let ops = Arc::new(ops);
-        let buffers = Arc::new(Mutex::new(Default::default()));
+        let buffers = Arc::new(Mutex::new(HashMap::default()));
 
         let (sender, receiver) = flume::unbounded();
         let backend = Backend {
@@ -157,34 +157,28 @@ impl GpuBuilder {
 
 async fn run(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
     let mut commit = HashSet::default();
+
+    let mut execute = |tape: TensorTape| {
+        let mut allocator = Allocator::default();
+        let ops: Vec<_> = tape
+            .ops
+            .into_iter()
+            .filter(|op| !commit.contains(&op.id()))
+            .collect();
+        for op in ops {
+            let op = allocator.alloc(op)?;
+            let io = op.io();
+            let id = op.id();
+            backend.execute(&op, io);
+            commit.insert(id);
+        }
+        Ok(tape.id)
+    };
+
     while let Ok(event) = receiver.recv_async().await {
         match event {
-            DeviceEvent::Execute { tape, sender } => {
-                let result = execute(&backend, &mut commit, tape);
-                let _ = sender.send(result);
-            }
-            DeviceEvent::ExecuteBack { .. } => todo!(),
+            DeviceEvent::Execute { tape, sender } => _ = sender.send(execute(tape)),
+            DeviceEvent::Back { .. } => todo!(),
         }
     }
-}
-
-fn execute(
-    backend: &Backend,
-    commit: &mut HashSet<TensorOpId>,
-    tape: TensorTape,
-) -> Result<TensorId, DeviceError> {
-    let mut allocator = Allocator::default();
-    let ops: Vec<_> = tape
-        .ops
-        .into_iter()
-        .filter(|op| !commit.contains(&op.id()))
-        .collect();
-    for op in ops {
-        let op = allocator.alloc(op)?;
-        let io = op.io();
-        let id = op.id();
-        backend.execute(&op, io);
-        commit.insert(id);
-    }
-    Ok(tape.id)
 }
