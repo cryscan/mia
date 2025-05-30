@@ -156,40 +156,37 @@ impl GpuBuilder {
 }
 
 async fn serve(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
-    let commit = Arc::new(Mutex::new(HashSet::default()));
+    let mut commit = HashSet::default();
 
-    let execute = {
-        let backend = backend.clone();
-        let commit = commit.clone();
-        move |tape: TensorTape| {
-            let mut commit = commit.lock().unwrap();
-            let mut allocator = Allocator::default();
-            let ops: Vec<_> = tape
-                .ops
-                .into_iter()
-                .filter(|op| !commit.contains(&op.id()))
-                .collect();
-            for op in ops {
-                let op = allocator.alloc(op)?;
-                let io = op.io();
-                let id = op.id();
-                backend.execute(&op, io);
-                commit.insert(id);
-            }
-            Ok(tape.id)
+    let execute = |commit: &mut HashSet<_>, tape: TensorTape| {
+        let mut allocator = Allocator::default();
+        let ops: Vec<_> = tape
+            .ops
+            .into_iter()
+            .filter(|op| !commit.contains(&op.id()))
+            .collect();
+        for op in ops {
+            let op = allocator.alloc(op)?;
+            let io = op.io();
+            let id = op.id();
+            backend.execute(&op, io);
+            commit.insert(id);
         }
+        Ok(tape.id)
     };
 
     while let Ok(event) = receiver.recv_async().await {
         match event {
-            DeviceEvent::Execute { tape, sender } => _ = sender.send_async(execute(tape)).await,
+            DeviceEvent::Execute { tape, sender } => {
+                let id = execute(&mut commit, tape);
+                _ = sender.send_async(id).await
+            }
             DeviceEvent::Back { .. } => todo!(),
             DeviceEvent::Cleanup { retain } => {
                 let retain: HashSet<_> = retain
                     .into_iter()
                     .flat_map(|tape| tape.ops.into_iter().map(|op| op.id()))
                     .collect();
-                let mut commit = commit.lock().unwrap();
                 commit.retain(|id| retain.contains(id));
             }
         }
