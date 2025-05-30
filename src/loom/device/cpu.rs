@@ -45,7 +45,7 @@ pub struct Cpu {
 
 impl Device for Cpu {
     fn execute(&self, event: DeviceEvent) {
-        let _ = self.sender.send(event);
+        _ = self.sender.send(event)
     }
 }
 
@@ -112,12 +112,12 @@ async fn serve(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
 
     'main: while let Ok(event) = receiver.recv_async().await {
         match event {
-            DeviceEvent::Execute { tape, sender } => _ = sender.send(execute(tape)),
+            DeviceEvent::Execute { tape, sender } => _ = sender.send_async(execute(tape)).await,
             DeviceEvent::Back { tape, sender } => {
                 let id = match execute(tape) {
                     Ok(id) => id,
                     Err(err) => {
-                        let _ = sender.send(Err(err));
+                        _ = sender.send_async(Err(err)).await;
                         continue 'main;
                     }
                 };
@@ -130,7 +130,7 @@ async fn serve(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                     let result = data
                         .map(|data| BackData { id, data })
                         .ok_or(DeviceError::Tensor(id));
-                    let _ = sender.send(result);
+                    _ = sender.send_async(result).await
                 };
                 #[cfg(not(target_arch = "wasm32"))]
                 tokio::spawn(future);

@@ -62,7 +62,7 @@ pub struct Gpu {
 
 impl Device for Gpu {
     fn execute(&self, event: DeviceEvent) {
-        let _ = self.sender.send(event);
+        _ = self.sender.send(event)
     }
 }
 
@@ -182,7 +182,7 @@ async fn serve(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
 
     while let Ok(event) = receiver.recv_async().await {
         match event {
-            DeviceEvent::Execute { tape, sender } => _ = sender.send(execute(tape)),
+            DeviceEvent::Execute { tape, sender } => _ = sender.send_async(execute(tape)).await,
             DeviceEvent::Back { .. } => todo!(),
             DeviceEvent::Cleanup { retain } => {
                 let retain: HashSet<_> = retain

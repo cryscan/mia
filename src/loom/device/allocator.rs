@@ -393,7 +393,7 @@ mod tests {
         ];
         let id = ID_MAP[5];
         let tape = TensorTape { id, ops };
-        let (sender, receiver) = flume::bounded(1);
+        let (sender, receiver) = flume::bounded(0);
         cpu.execute(DeviceEvent::Execute { tape, sender });
 
         let _ = receiver.recv_async().await??;
