@@ -48,6 +48,9 @@ pub enum DeviceEvent {
         tape: TensorTape,
         sender: flume::Sender<Result<BackData, DeviceError>>,
     },
+    Cleanup {
+        retain: Vec<TensorTape>,
+    },
 }
 
 pub trait Backend: Send + Sync {

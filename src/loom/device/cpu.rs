@@ -1,6 +1,6 @@
 use std::{
     any::TypeId,
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex, RwLock},
 };
 
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
@@ -66,9 +66,9 @@ impl CpuBuilder {
         let (sender, receiver) = flume::unbounded();
         let backend = Backend { ops, buffers };
         #[cfg(not(target_arch = "wasm32"))]
-        tokio::spawn(run(backend, receiver));
+        tokio::spawn(serve(backend, receiver));
         #[cfg(target_arch = "wasm32")]
-        wasm_bindgen_futures::spawn_local(run(backend, receiver));
+        wasm_bindgen_futures::spawn_local(serve(backend, receiver));
 
         let id = Default::default();
         Cpu { id, sender }
@@ -85,27 +85,32 @@ impl CpuBuilder {
     }
 }
 
-async fn run(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
-    let mut commit = HashSet::default();
+async fn serve(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
+    let commit = Arc::new(Mutex::new(HashSet::default()));
 
-    let mut execute = |tape: TensorTape| {
-        let mut allocator = Allocator::default();
-        let ops: Vec<_> = tape
-            .ops
-            .into_iter()
-            .filter(|op| !commit.contains(&op.id()))
-            .collect();
-        for op in ops {
-            let op = allocator.alloc(op)?;
-            let io = op.io();
-            let id = op.id();
-            backend.execute(&op, io);
-            commit.insert(id);
+    let execute = {
+        let backend = backend.clone();
+        let commit = commit.clone();
+        move |tape: TensorTape| {
+            let mut commit = commit.lock().unwrap();
+            let mut allocator = Allocator::default();
+            let ops: Vec<_> = tape
+                .ops
+                .into_iter()
+                .filter(|op| !commit.contains(&op.id()))
+                .collect();
+            for op in ops {
+                let op = allocator.alloc(op)?;
+                let io = op.io();
+                let id = op.id();
+                backend.execute(&op, io);
+                commit.insert(id);
+            }
+            Ok(tape.id)
         }
-        Ok(tape.id)
     };
 
-    while let Ok(event) = receiver.recv_async().await {
+    'main: while let Ok(event) = receiver.recv_async().await {
         match event {
             DeviceEvent::Execute { tape, sender } => _ = sender.send(execute(tape)),
             DeviceEvent::Back { tape, sender } => {
@@ -113,13 +118,13 @@ async fn run(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                     Ok(id) => id,
                     Err(err) => {
                         let _ = sender.send(Err(err));
-                        continue;
+                        continue 'main;
                     }
                 };
                 let backend = backend.clone();
                 let future = async move {
                     let data = {
-                        let buffers = backend.buffers.read().expect("failed to lock");
+                        let buffers = backend.buffers.read().unwrap();
                         buffers.get(&id).cloned()
                     };
                     let result = data
@@ -131,6 +136,14 @@ async fn run(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                 tokio::spawn(future);
                 #[cfg(target_arch = "wasm32")]
                 wasm_bindgen_futures::spawn_local(future);
+            }
+            DeviceEvent::Cleanup { retain } => {
+                let retain: HashSet<_> = retain
+                    .into_iter()
+                    .flat_map(|tape| tape.ops.into_iter().map(|op| op.id()))
+                    .collect();
+                let mut commit = commit.lock().unwrap();
+                commit.retain(|id| retain.contains(id));
             }
         }
     }
