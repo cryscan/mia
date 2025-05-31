@@ -41,10 +41,10 @@ impl super::Backend for Backend {
     }
 
     #[inline]
-    fn alloc(&self, id: TensorId, contents: &[u8]) -> Self::Buffer {
+    fn create(&self, id: TensorId, contents: &[u8]) -> Self::Buffer {
         use wgpu::util::DeviceExt;
 
-        let label = format!("tensor: {id}");
+        let label = format!("create: {id}");
         let label = Some(label.as_str());
         let usage = wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::COPY_DST
@@ -61,6 +61,31 @@ impl super::Backend for Backend {
             .write()
             .expect("failed to lock")
             .insert(id, buffer.clone());
+        buffer
+    }
+
+    #[inline]
+    fn alloc(&self, id: TensorId, size: usize) -> Self::Buffer {
+        let mut buffers = self.buffers.write().expect("failed to lock");
+        let buffer = buffers
+            .get(&id)
+            .cloned()
+            .filter(|data| data.size() as usize == size);
+        let buffer = match buffer {
+            Some(buffer) => buffer,
+            None => {
+                let label = format!("alloc: {id}");
+                self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label.as_str()),
+                    size: size as u64,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_DST
+                        | wgpu::BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                })
+            }
+        };
+        buffers.insert(id, buffer.clone());
         buffer
     }
 

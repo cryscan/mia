@@ -63,7 +63,9 @@ pub trait Backend: Send + Sync {
     /// Dynamically dispatch to actual `op`'s execution, using given `io`.
     fn execute(&self, op: &dyn TensorOp, io: Vec<TensorIr>);
     /// Create a buffer for tensor of `id`.
-    fn alloc(&self, id: TensorId, contents: &[u8]) -> Self::Buffer;
+    fn create(&self, id: TensorId, contents: &[u8]) -> Self::Buffer;
+    /// Allocate a buffer for tensor of `id`.
+    fn alloc(&self, id: TensorId, size: usize) -> Self::Buffer;
     /// Get the buffer of tensor of `id`. Returns [`None`] if not found.
     fn fetch(&self, id: TensorId) -> Option<Self::Buffer>;
 }

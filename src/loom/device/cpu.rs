@@ -36,12 +36,24 @@ impl super::Backend for Backend {
     }
 
     #[inline]
-    fn alloc(&self, id: TensorId, contents: &[u8]) -> Self::Buffer {
+    fn create(&self, id: TensorId, contents: &[u8]) -> Self::Buffer {
         let buffer: Self::Buffer = contents.to_vec().into();
         self.buffers
             .write()
             .expect("failed to lock")
             .insert(id, buffer.clone());
+        buffer
+    }
+
+    #[inline]
+    fn alloc(&self, id: TensorId, size: usize) -> Self::Buffer {
+        let mut buffers = self.buffers.write().expect("failed to lock");
+        let buffer = buffers.get(&id).cloned().filter(|data| data.len() == size);
+        let buffer = match buffer {
+            Some(data) => data,
+            None => vec![0; size].into(),
+        };
+        buffers.insert(id, buffer.clone());
         buffer
     }
 
