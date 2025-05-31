@@ -84,6 +84,33 @@ impl Backend {
     pub fn queue(&self) -> &wgpu::Queue {
         &self.queue
     }
+
+    /// Reads a tensor of `id` back.
+    async fn read(&self, id: TensorId) -> Result<Box<[u8]>, DeviceError> {
+        let (sender, receiver) = flume::bounded(0);
+        let buffer = self.fetch(id).ok_or(DeviceError::Tensor(id))?;
+
+        wgpu::util::DownloadBuffer::read_buffer(
+            &self.device,
+            &self.queue,
+            &buffer.slice(..),
+            move |buffer| {
+                let data = match buffer {
+                    Ok(buffer) => Ok(buffer.to_vec().into_boxed_slice()),
+                    Err(err) => Err(DeviceError::from(err)),
+                };
+                _ = sender.send(data)
+            },
+        );
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let device = self.device.clone();
+            tokio::task::spawn_blocking(move || device.poll(wgpu::PollType::Wait));
+        }
+
+        receiver.recv_async().await?
+    }
 }
 
 #[allow(unused)]
@@ -159,10 +186,7 @@ impl GpuBuilder {
             queue,
             buffers,
         };
-        #[cfg(not(target_arch = "wasm32"))]
-        tokio::spawn(serve(backend, receiver));
-        #[cfg(target_arch = "wasm32")]
-        wasm_bindgen_futures::spawn_local(serve(backend, receiver));
+        super::spawn(serve(backend, receiver));
 
         let id = Default::default();
         let device = Gpu { id, sender };
@@ -224,33 +248,15 @@ async fn serve(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         continue 'main;
                     }
                 };
-                let buffer = match backend.fetch(id) {
-                    Some(buffer) => buffer,
-                    None => {
-                        _ = sender.send_async(Err(DeviceError::Tensor(id))).await;
-                        continue 'main;
-                    }
-                };
-
-                wgpu::util::DownloadBuffer::read_buffer(
-                    &backend.device,
-                    &backend.queue,
-                    &buffer.slice(..),
-                    move |buffer| {
-                        let data = match buffer {
-                            Ok(buffer) => Ok(buffer.to_vec().into()),
-                            Err(err) => Err(DeviceError::from(err)),
-                        }
+                let backend = backend.clone();
+                super::spawn(async move {
+                    let data = backend
+                        .read(id)
+                        .await
+                        .map(Into::into)
                         .map(|data| BackData { data, id });
-                        _ = sender.send(data)
-                    },
-                );
-
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    let device = backend.device.clone();
-                    tokio::task::spawn_blocking(move || device.poll(wgpu::PollType::Wait));
-                }
+                    _ = sender.send_async(data).await
+                });
             }
             DeviceEvent::Cleanup { retain } => {
                 let retain: HashSet<_> = retain

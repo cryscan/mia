@@ -28,6 +28,8 @@ pub trait Device {
 pub enum DeviceError {
     #[error("failed to map buffer")]
     Buffer(#[from] wgpu::BufferAsyncError),
+    #[error("failed to receive")]
+    Recv(#[from] flume::RecvError),
     #[error("failed to allocate tensor")]
     Alloc(#[from] allocator::AllocError),
     #[error("tensor not found: {0}")]
@@ -67,6 +69,25 @@ pub trait Backend: Send + Sync {
 }
 
 type OpVTable<B> = HashMap<TypeId, fn(&B, &dyn TensorOp, Vec<TensorIr>)>;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[inline]
+fn spawn<O, F>(future: F) -> tokio::task::JoinHandle<O>
+where
+    O: Send + 'static,
+    F: std::future::Future<Output = O> + Send + 'static,
+{
+    tokio::spawn(future)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[inline]
+fn spawn<F>(future: F)
+where
+    F: std::future::Future<Output = ()> + 'static,
+{
+    wasm_bindgen_futures::spawn_local(future);
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(test)]

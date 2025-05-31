@@ -86,10 +86,7 @@ impl CpuBuilder {
 
         let (sender, receiver) = flume::unbounded();
         let backend = Backend { ops, buffers };
-        #[cfg(not(target_arch = "wasm32"))]
-        tokio::spawn(serve(backend, receiver));
-        #[cfg(target_arch = "wasm32")]
-        wasm_bindgen_futures::spawn_local(serve(backend, receiver));
+        super::spawn(serve(backend, receiver));
 
         let id = Default::default();
         Cpu { id, sender }
