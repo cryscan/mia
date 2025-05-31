@@ -119,21 +119,15 @@ async fn serve(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         continue 'main;
                     }
                 };
-                let backend = backend.clone();
-                let future = async move {
-                    let data = {
-                        let buffers = backend.buffers.read().unwrap();
-                        buffers.get(&id).cloned()
-                    };
-                    let result = data
-                        .map(|data| BackData { id, data })
-                        .ok_or(DeviceError::Tensor(id));
-                    _ = sender.send_async(result).await
-                };
-                #[cfg(not(target_arch = "wasm32"))]
-                tokio::spawn(future);
-                #[cfg(target_arch = "wasm32")]
-                wasm_bindgen_futures::spawn_local(future);
+                let data = backend
+                    .buffers
+                    .read()
+                    .expect("failed to lock")
+                    .get(&id)
+                    .cloned()
+                    .map(|data| BackData { id, data })
+                    .ok_or(DeviceError::Tensor(id));
+                _ = sender.send_async(data).await
             }
             DeviceEvent::Cleanup { retain } => {
                 let retain: HashSet<_> = retain

@@ -1,13 +1,13 @@
 use std::{
     any::TypeId,
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
 };
 
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use thiserror::Error;
 
 use super::{
-    Backend as _, Device, DeviceEvent, DeviceId, OpVTable,
+    BackData, Backend as _, Device, DeviceError, DeviceEvent, DeviceId, OpVTable,
     allocator::{AllocOp, Allocator},
 };
 use crate::loom::{
@@ -25,7 +25,7 @@ pub struct Backend {
     /// Operators that the device is able to execute.
     ops: Arc<OpVTable<Self>>,
     /// Pool of GPU buffers.
-    buffers: Arc<Mutex<HashMap<TensorId, wgpu::Buffer>>>,
+    buffers: Arc<RwLock<HashMap<TensorId, wgpu::Buffer>>>,
 }
 
 impl super::Backend for Backend {
@@ -115,7 +115,7 @@ impl GpuBuilder {
             .await?;
 
         let ops = Arc::new(ops);
-        let buffers = Arc::new(Mutex::new(HashMap::default()));
+        let buffers = Arc::new(RwLock::new(HashMap::default()));
 
         let (sender, receiver) = flume::unbounded();
         let backend = Backend {
@@ -175,13 +175,54 @@ async fn serve(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
         Ok(tape.id)
     };
 
-    while let Ok(event) = receiver.recv_async().await {
+    'main: while let Ok(event) = receiver.recv_async().await {
         match event {
             DeviceEvent::Execute { tape, sender } => {
                 let id = execute(&mut commit, tape);
                 _ = sender.send_async(id).await
             }
-            DeviceEvent::Back { .. } => todo!(),
+            DeviceEvent::Back { tape, sender } => {
+                let id = match execute(&mut commit, tape) {
+                    Ok(id) => id,
+                    Err(err) => {
+                        _ = sender.send_async(Err(err)).await;
+                        continue 'main;
+                    }
+                };
+                let buffer = backend
+                    .buffers
+                    .read()
+                    .expect("failed to lock")
+                    .get(&id)
+                    .cloned();
+                let buffer = match buffer {
+                    Some(buffer) => buffer,
+                    None => {
+                        _ = sender.send_async(Err(DeviceError::Tensor(id))).await;
+                        continue 'main;
+                    }
+                };
+
+                wgpu::util::DownloadBuffer::read_buffer(
+                    &backend.device,
+                    &backend.queue,
+                    &buffer.slice(..),
+                    move |buffer| {
+                        let data = match buffer {
+                            Ok(buffer) => Ok(buffer.to_vec().into()),
+                            Err(err) => Err(DeviceError::from(err)),
+                        }
+                        .map(|data| BackData { data, id });
+                        _ = sender.send(data)
+                    },
+                );
+
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let device = backend.device.clone();
+                    tokio::task::spawn_blocking(move || device.poll(wgpu::PollType::Wait));
+                }
+            }
             DeviceEvent::Cleanup { retain } => {
                 let retain: HashSet<_> = retain
                     .into_iter()

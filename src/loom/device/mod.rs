@@ -26,6 +26,8 @@ pub trait Device {
 
 #[derive(Debug, Error)]
 pub enum DeviceError {
+    #[error("failed to map buffer")]
+    Buffer(#[from] wgpu::BufferAsyncError),
     #[error("failed to allocate tensor")]
     Alloc(#[from] allocator::AllocError),
     #[error("tensor not found: {0}")]
