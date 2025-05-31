@@ -24,6 +24,8 @@ pub struct Backend {
 }
 
 impl super::Backend for Backend {
+    type Buffer = Arc<[u8]>;
+
     #[inline]
     fn execute(&self, op: &dyn TensorOp, io: Vec<TensorIr>) {
         let id = &op.type_id();
@@ -31,6 +33,25 @@ impl super::Backend for Backend {
             Some(f) => f(self, op, io),
             None => log::error!("unable to execute op of type {}", op.name()),
         }
+    }
+
+    #[inline]
+    fn alloc(&self, id: TensorId, contents: &[u8]) -> Self::Buffer {
+        let buffer: Self::Buffer = contents.to_vec().into();
+        self.buffers
+            .write()
+            .expect("failed to lock")
+            .insert(id, buffer.clone());
+        buffer
+    }
+
+    #[inline]
+    fn fetch(&self, id: TensorId) -> Option<Self::Buffer> {
+        self.buffers
+            .read()
+            .expect("failed to lock")
+            .get(&id)
+            .cloned()
     }
 }
 
@@ -120,11 +141,7 @@ async fn serve(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                     }
                 };
                 let data = backend
-                    .buffers
-                    .read()
-                    .expect("failed to lock")
-                    .get(&id)
-                    .cloned()
+                    .fetch(id)
                     .map(|data| BackData { id, data })
                     .ok_or(DeviceError::Tensor(id));
                 _ = sender.send_async(data).await

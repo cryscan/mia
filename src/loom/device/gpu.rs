@@ -29,6 +29,8 @@ pub struct Backend {
 }
 
 impl super::Backend for Backend {
+    type Buffer = wgpu::Buffer;
+
     #[inline]
     fn execute(&self, op: &dyn TensorOp, io: Vec<TensorIr>) {
         let id = &op.type_id();
@@ -36,6 +38,39 @@ impl super::Backend for Backend {
             Some(f) => f(self, op, io),
             None => log::error!("unable to execute op of type {}", op.name()),
         }
+    }
+
+    #[inline]
+    fn alloc(&self, id: TensorId, contents: &[u8]) -> Self::Buffer {
+        use wgpu::util::DeviceExt;
+
+        let label = format!("tensor: {id}");
+        let label = Some(label.as_str());
+        let usage = wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC;
+
+        let buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label,
+                contents,
+                usage,
+            });
+        self.buffers
+            .write()
+            .expect("failed to lock")
+            .insert(id, buffer.clone());
+        buffer
+    }
+
+    #[inline]
+    fn fetch(&self, id: TensorId) -> Option<Self::Buffer> {
+        self.buffers
+            .read()
+            .expect("failed to lock")
+            .get(&id)
+            .cloned()
     }
 }
 
@@ -189,13 +224,7 @@ async fn serve(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         continue 'main;
                     }
                 };
-                let buffer = backend
-                    .buffers
-                    .read()
-                    .expect("failed to lock")
-                    .get(&id)
-                    .cloned();
-                let buffer = match buffer {
+                let buffer = match backend.fetch(id) {
                     Some(buffer) => buffer,
                     None => {
                         _ = sender.send_async(Err(DeviceError::Tensor(id))).await;
