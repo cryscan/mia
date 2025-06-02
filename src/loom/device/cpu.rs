@@ -1,6 +1,6 @@
 use std::{
     any::TypeId,
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex, RwLock},
 };
 
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
@@ -24,7 +24,7 @@ pub struct Backend {
 }
 
 impl super::Backend for Backend {
-    type Buffer = Arc<[u8]>;
+    type Data = Arc<[u8]>;
 
     #[inline]
     fn execute(&self, op: &dyn TensorOp, io: Vec<TensorIr>) {
@@ -36,29 +36,29 @@ impl super::Backend for Backend {
     }
 
     #[inline]
-    fn create(&self, id: TensorId, contents: &[u8]) -> Self::Buffer {
-        let buffer: Self::Buffer = contents.to_vec().into();
+    fn create(&self, id: TensorId, contents: &[u8]) -> Self::Data {
+        let data: Self::Data = contents.to_vec().into();
         self.buffers
             .write()
             .expect("failed to lock")
-            .insert(id, buffer.clone());
-        buffer
+            .insert(id, data.clone());
+        data
     }
 
     #[inline]
-    fn alloc(&self, id: TensorId, size: usize) -> Self::Buffer {
+    fn alloc(&self, id: TensorId, size: usize) -> Self::Data {
         let mut buffers = self.buffers.write().expect("failed to lock");
-        let buffer = buffers.get(&id).cloned().filter(|data| data.len() == size);
-        let buffer = match buffer {
+        let data = buffers.get(&id).cloned().filter(|data| data.len() == size);
+        let data = match data {
             Some(data) => data,
             None => vec![0; size].into(),
         };
-        buffers.insert(id, buffer.clone());
-        buffer
+        buffers.insert(id, data.clone());
+        data
     }
 
     #[inline]
-    fn fetch(&self, id: TensorId) -> Option<Self::Buffer> {
+    fn fetch(&self, id: TensorId) -> Option<Self::Data> {
         self.buffers
             .read()
             .expect("failed to lock")
@@ -116,51 +116,65 @@ impl CpuBuilder {
 }
 
 async fn serve(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
-    let mut commit = HashSet::default();
+    let commit = Arc::new(Mutex::new(HashSet::default()));
 
-    let execute = |commit: &mut HashSet<_>, tape: TensorTape| {
-        let mut allocator = Allocator::default();
-        let ops: Vec<_> = tape
-            .ops
-            .into_iter()
-            .filter(|op| !commit.contains(&op.id()))
-            .collect();
-        for op in ops {
-            let op = allocator.alloc(op)?;
-            let io = op.io();
-            let id = op.id();
-            backend.execute(&op, io);
-            commit.insert(id);
+    let execute = {
+        let commit = commit.clone();
+        let backend = backend.clone();
+        |tape: TensorTape| async move {
+            let mut commit = commit.lock().expect("failed to lock");
+            let mut allocator = Allocator::default();
+            let ops: Vec<_> = tape
+                .ops
+                .into_iter()
+                .filter(|op| !commit.contains(&op.id()))
+                .collect();
+            for op in ops {
+                let op = allocator.alloc(op)?;
+                let io = op.io();
+                let id = op.id();
+                backend.execute(&op, io);
+                commit.insert(id);
+            }
+            Ok(tape.id)
         }
-        Ok(tape.id)
     };
 
-    'main: while let Ok(event) = receiver.recv_async().await {
+    let back = {
+        let execute = execute.clone();
+        let backend = backend.clone();
+        |tape: TensorTape| async move {
+            let id = execute(tape).await?;
+            let data = backend.fetch(id).ok_or(DeviceError::Tensor(id))?;
+            Ok(BackData(data))
+        }
+    };
+
+    let execute = |tape, sender: flume::Sender<_>| {
+        let execute = execute.clone();
+        let future = async move { _ = sender.send_async(execute(tape).await).await };
+        super::spawn(future);
+    };
+
+    let back = |tape, sender: flume::Sender<_>| {
+        let back = back.clone();
+        let future = async move { _ = sender.send_async(back(tape).await).await };
+        super::spawn(future);
+    };
+
+    while let Ok(event) = receiver.recv_async().await {
         match event {
-            DeviceEvent::Execute { tape, sender } => {
-                let id = execute(&mut commit, tape);
-                _ = sender.send_async(id).await
-            }
-            DeviceEvent::Back { tape, sender } => {
-                let id = match execute(&mut commit, tape) {
-                    Ok(id) => id,
-                    Err(err) => {
-                        _ = sender.send_async(Err(err)).await;
-                        continue 'main;
-                    }
-                };
-                let data = backend
-                    .fetch(id)
-                    .map(|data| BackData { id, data })
-                    .ok_or(DeviceError::Tensor(id));
-                _ = sender.send_async(data).await
-            }
+            DeviceEvent::Execute { tape, sender } => execute(tape, sender),
+            DeviceEvent::Back { tape, sender } => back(tape, sender),
             DeviceEvent::Cleanup { retain } => {
                 let retain: HashSet<_> = retain
                     .into_iter()
                     .flat_map(|tape| tape.ops.into_iter().map(|op| op.id()))
                     .collect();
-                commit.retain(|id| retain.contains(id));
+                commit
+                    .lock()
+                    .expect("failed to lock")
+                    .retain(|id| retain.contains(id));
             }
         }
     }

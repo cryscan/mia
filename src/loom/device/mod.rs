@@ -36,11 +36,8 @@ pub enum DeviceError {
     Tensor(TensorId),
 }
 
-#[derive(Debug, Clone)]
-pub struct BackData {
-    pub id: TensorId,
-    pub data: Arc<[u8]>,
-}
+#[derive(Debug, Clone, Deref, DerefMut)]
+pub struct BackData(pub Arc<[u8]>);
 
 #[derive(Debug, Clone)]
 pub enum DeviceEvent {
@@ -58,16 +55,16 @@ pub enum DeviceEvent {
 }
 
 pub trait Backend: Send + Sync {
-    type Buffer;
+    type Data;
 
     /// Dynamically dispatch to actual `op`'s execution, using given `io`.
     fn execute(&self, op: &dyn TensorOp, io: Vec<TensorIr>);
     /// Create a buffer for tensor of `id`.
-    fn create(&self, id: TensorId, contents: &[u8]) -> Self::Buffer;
+    fn create(&self, id: TensorId, contents: &[u8]) -> Self::Data;
     /// Allocate a buffer for tensor of `id`.
-    fn alloc(&self, id: TensorId, size: usize) -> Self::Buffer;
+    fn alloc(&self, id: TensorId, size: usize) -> Self::Data;
     /// Get the buffer of tensor of `id`. Returns [`None`] if not found.
-    fn fetch(&self, id: TensorId) -> Option<Self::Buffer>;
+    fn fetch(&self, id: TensorId) -> Option<Self::Data>;
 }
 
 type OpVTable<B> = HashMap<TypeId, fn(&B, &dyn TensorOp, Vec<TensorIr>)>;
