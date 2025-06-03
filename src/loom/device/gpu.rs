@@ -1,4 +1,4 @@
-use std::any::TypeId;
+use std::{any::TypeId, sync::Arc};
 
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use thiserror::Error;
@@ -23,6 +23,8 @@ pub struct Backend {
     ops: OpVTable<Self>,
     /// Pool of GPU buffers.
     buffers: HashMap<TensorId, wgpu::Buffer>,
+    /// Kernel launches and uploads issued by executing a tape of ops.
+    launches: Vec<Launch>,
 }
 
 impl super::Backend for Backend {
@@ -144,6 +146,7 @@ impl GpuBuilder {
             })
             .await?;
         let buffers = HashMap::default();
+        let launches = Vec::new();
 
         let (sender, receiver) = flume::unbounded();
         let backend = Backend {
@@ -151,6 +154,7 @@ impl GpuBuilder {
             device,
             queue,
             buffers,
+            launches,
         };
         super::spawn(serve(backend, receiver));
 
@@ -178,6 +182,25 @@ impl GpuBuilder {
         self.ops.insert(id, f);
         self
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum Launch {
+    Kernel(Kernel),
+    Upload(Upload),
+}
+
+#[derive(Debug, Clone)]
+pub struct Kernel {
+    pub pipeline: wgpu::ComputePipeline,
+    pub bindings: Vec<wgpu::BindGroup>,
+    pub dispatch: [u32; 3],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Upload {
+    pub id: TensorId,
+    pub data: Arc<[u8]>,
 }
 
 async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
@@ -253,6 +276,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                     .flat_map(|tape| tape.ops.into_iter().map(|op| op.id()))
                     .collect();
                 commit.retain(|id| retain.contains(id));
+                allocator.reset();
             }
         }
     }

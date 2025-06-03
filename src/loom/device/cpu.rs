@@ -160,6 +160,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                     .flat_map(|tape| tape.ops.into_iter().map(|op| op.id()))
                     .collect();
                 commit.retain(|id| retain.contains(id));
+                allocator.reset();
             }
         }
     }
