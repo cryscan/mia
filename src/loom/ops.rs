@@ -108,7 +108,7 @@ impl std::fmt::Debug for dyn TensorOp {
 
 /// Implemented for each [`Device`] for each [`TensorOp`].
 pub trait BackendOp<B: Backend> {
-    fn execute(&self, backend: &B, io: Vec<TensorIr>);
+    fn execute(&self, backend: &mut B, io: Vec<TensorIr>);
 }
 
 /// Records operators a tensor has experienced.

@@ -58,16 +58,16 @@ pub trait Backend: Send + Sync {
     type Data;
 
     /// Dynamically dispatch to actual `op`'s execution, using given `io`.
-    fn execute(&self, op: &dyn TensorOp, io: Vec<TensorIr>);
+    fn execute(&mut self, op: &dyn TensorOp, io: Vec<TensorIr>);
     /// Create a buffer for tensor of `id`.
-    fn create(&self, id: TensorId, contents: &[u8]) -> Self::Data;
+    fn create(&mut self, id: TensorId, contents: &[u8]) -> Self::Data;
     /// Allocate a buffer for tensor of `id`.
-    fn alloc(&self, id: TensorId, size: usize) -> Self::Data;
+    fn alloc(&mut self, id: TensorId, size: usize) -> Self::Data;
     /// Get the buffer of tensor of `id`. Returns [`None`] if not found.
     fn fetch(&self, id: TensorId) -> Option<Self::Data>;
 }
 
-type OpVTable<B> = HashMap<TypeId, fn(&B, &dyn TensorOp, Vec<TensorIr>)>;
+type OpVTable<B> = HashMap<TypeId, fn(&mut B, &dyn TensorOp, Vec<TensorIr>)>;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[inline]
@@ -112,7 +112,7 @@ mod tests {
         }
 
         impl<const N: usize> BackendOp<cpu::Backend> for PhonyOp<N> {
-            fn execute(&self, _backend: &cpu::Backend, _io: Vec<TensorIr>) {
+            fn execute(&self, _backend: &mut cpu::Backend, _io: Vec<TensorIr>) {
                 println!("{}", self.name())
             }
         }

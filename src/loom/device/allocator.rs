@@ -174,7 +174,7 @@ impl TensorOp for AllocOp {
 }
 
 impl<B: Backend> BackendOp<B> for AllocOp {
-    fn execute(&self, backend: &B, io: Vec<TensorIr>) {
+    fn execute(&self, backend: &mut B, io: Vec<TensorIr>) {
         backend.execute(self.op.as_ref(), io);
     }
 }
@@ -237,7 +237,7 @@ mod tests {
     }
 
     impl BackendOp<cpu::Backend> for PhonyBinaryOp {
-        fn execute(&self, _backend: &cpu::Backend, io: Vec<TensorIr>) {
+        fn execute(&self, _backend: &mut cpu::Backend, io: Vec<TensorIr>) {
             println!("{}", self.name());
             self.io()
                 .into_iter()
@@ -265,7 +265,7 @@ mod tests {
     }
 
     impl BackendOp<cpu::Backend> for PhonyUnaryOp {
-        fn execute(&self, _backend: &cpu::Backend, io: Vec<TensorIr>) {
+        fn execute(&self, _backend: &mut cpu::Backend, io: Vec<TensorIr>) {
             println!("{}", self.name());
             self.io()
                 .into_iter()

@@ -1,7 +1,4 @@
-use std::{
-    any::TypeId,
-    sync::{Arc, Mutex, RwLock},
-};
+use std::any::TypeId;
 
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use thiserror::Error;
@@ -11,7 +8,7 @@ use super::{
     allocator::{AllocOp, Allocator},
 };
 use crate::loom::{
-    ops::{BackendOp, TensorIr, TensorOp, TensorTape},
+    ops::{BackendOp, TensorIr, TensorOp},
     tensor::TensorId,
 };
 
@@ -23,16 +20,16 @@ pub struct Backend {
     /// The WebGPU command queue.
     queue: wgpu::Queue,
     /// Operators that the device is able to execute.
-    ops: Arc<OpVTable<Self>>,
+    ops: OpVTable<Self>,
     /// Pool of GPU buffers.
-    buffers: Arc<RwLock<HashMap<TensorId, wgpu::Buffer>>>,
+    buffers: HashMap<TensorId, wgpu::Buffer>,
 }
 
 impl super::Backend for Backend {
     type Data = wgpu::Buffer;
 
     #[inline]
-    fn execute(&self, op: &dyn TensorOp, io: Vec<TensorIr>) {
+    fn execute(&mut self, op: &dyn TensorOp, io: Vec<TensorIr>) {
         let id = &op.type_id();
         match self.ops.get(id) {
             Some(f) => f(self, op, io),
@@ -41,7 +38,7 @@ impl super::Backend for Backend {
     }
 
     #[inline]
-    fn create(&self, id: TensorId, contents: &[u8]) -> Self::Data {
+    fn create(&mut self, id: TensorId, contents: &[u8]) -> Self::Data {
         use wgpu::util::DeviceExt;
         let data = self
             .device
@@ -52,17 +49,14 @@ impl super::Backend for Backend {
                     | wgpu::BufferUsages::COPY_DST
                     | wgpu::BufferUsages::COPY_SRC,
             });
-        self.buffers
-            .write()
-            .expect("failed to lock")
-            .insert(id, data.clone());
+        self.buffers.insert(id, data.clone());
         data
     }
 
     #[inline]
-    fn alloc(&self, id: TensorId, size: usize) -> Self::Data {
-        let mut buffers = self.buffers.write().expect("failed to lock");
-        let data = buffers
+    fn alloc(&mut self, id: TensorId, size: usize) -> Self::Data {
+        let data = self
+            .buffers
             .get(&id)
             .cloned()
             .filter(|data| data.size() as usize == size);
@@ -77,48 +71,13 @@ impl super::Backend for Backend {
                 mapped_at_creation: false,
             }),
         };
-        buffers.insert(id, data.clone());
+        self.buffers.insert(id, data.clone());
         data
     }
 
     #[inline]
     fn fetch(&self, id: TensorId) -> Option<Self::Data> {
-        self.buffers
-            .read()
-            .expect("failed to lock")
-            .get(&id)
-            .cloned()
-    }
-}
-
-impl Backend {
-    #[inline]
-    pub fn device(&self) -> &wgpu::Device {
-        &self.device
-    }
-
-    #[inline]
-    pub fn queue(&self) -> &wgpu::Queue {
-        &self.queue
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[inline]
-    pub fn poll(&self) {
-        let device = self.device.clone();
-        tokio::task::spawn_blocking(move || device.poll(wgpu::PollType::Wait));
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    #[inline]
-    pub fn poll(&self) {}
-
-    #[inline]
-    pub fn read<F>(&self, buffer: &wgpu::BufferSlice, callback: F)
-    where
-        F: FnOnce(Result<wgpu::util::DownloadBuffer, wgpu::BufferAsyncError>) + Send + 'static,
-    {
-        wgpu::util::DownloadBuffer::read_buffer(&self.device, &self.queue, buffer, callback);
+        self.buffers.get(&id).cloned()
     }
 }
 
@@ -184,9 +143,7 @@ impl GpuBuilder {
                 trace: wgpu::Trace::Off,
             })
             .await?;
-
-        let ops = Arc::new(ops);
-        let buffers = Arc::new(RwLock::new(HashMap::default()));
+        let buffers = HashMap::default();
 
         let (sender, receiver) = flume::unbounded();
         let backend = Backend {
@@ -214,7 +171,7 @@ impl GpuBuilder {
 
     pub fn add_op<Op: TensorOp + BackendOp<Backend>>(mut self) -> Self {
         let id = TypeId::of::<Op>();
-        let f = |backend: &Backend, op: &dyn TensorOp, io| match op.downcast_ref::<Op>() {
+        let f = |backend: &mut Backend, op: &dyn TensorOp, io| match op.downcast_ref::<Op>() {
             Some(op) => op.execute(backend, io),
             None => unreachable!(),
         };
@@ -223,75 +180,79 @@ impl GpuBuilder {
     }
 }
 
-async fn serve(backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
-    let commit = Arc::new(Mutex::new(HashSet::default()));
-
-    let execute = {
-        let commit = commit.clone();
-        let backend = backend.clone();
-        |tape: TensorTape| async move {
-            let mut commit = commit.lock().expect("failed to lock");
-            let mut allocator = Allocator::default();
-            let ops: Vec<_> = tape
-                .ops
-                .into_iter()
-                .filter(|op| !commit.contains(&op.id()))
-                .collect();
-            for op in ops {
-                let op = allocator.alloc(op)?;
-                let io = op.io();
-                let id = op.id();
-                backend.execute(&op, io);
-                commit.insert(id);
-            }
-            Ok(tape.id)
-        }
-    };
-
-    let back = {
-        let execute = execute.clone();
-        let backend = backend.clone();
-        |tape: TensorTape| async move {
-            let id = execute(tape).await?;
-            let data = backend.fetch(id).ok_or(DeviceError::Tensor(id))?;
-            let (sender, receiver) = flume::bounded(0);
-            backend.read(&data.slice(..), move |data| {
-                let data = data
-                    .map(|data| data.to_vec().into())
-                    .map(BackData)
-                    .map_err(DeviceError::from);
-                _ = sender.send(data)
-            });
-            backend.poll();
-            receiver.recv_async().await?
-        }
-    };
-
-    let execute = |tape, sender: flume::Sender<_>| {
-        let execute = execute.clone();
-        let future = async move { _ = sender.send_async(execute(tape).await).await };
-        super::spawn(future);
-    };
-
-    let back = |tape, sender: flume::Sender<_>| {
-        let back = back.clone();
-        let future = async move { _ = sender.send_async(back(tape).await).await };
-        super::spawn(future);
-    };
+async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
+    let mut commit = HashSet::default();
+    let mut allocator = Allocator::default();
 
     while let Ok(event) = receiver.recv_async().await {
         match event {
-            DeviceEvent::Execute { tape, sender } => execute(tape, sender),
-            DeviceEvent::Back { tape, sender } => back(tape, sender),
+            DeviceEvent::Execute { tape, sender } => {
+                let id = async {
+                    let ops: Vec<_> = tape
+                        .ops
+                        .into_iter()
+                        .filter(|op| !commit.contains(&op.id()))
+                        .collect();
+                    for op in ops {
+                        let op = allocator.alloc(op)?;
+                        let io = op.io();
+                        let id = op.id();
+                        backend.execute(&op, io);
+                        commit.insert(id);
+                    }
+                    Ok(tape.id)
+                }
+                .await;
+                _ = sender.send_async(id).await
+            }
+            DeviceEvent::Back { tape, sender } => {
+                let data = async {
+                    let ops: Vec<_> = tape
+                        .ops
+                        .into_iter()
+                        .filter(|op| !commit.contains(&op.id()))
+                        .collect();
+                    for op in ops {
+                        let op = allocator.alloc(op)?;
+                        let io = op.io();
+                        let id = op.id();
+                        backend.execute(&op, io);
+                        commit.insert(id);
+                    }
+                    let id = tape.id;
+                    backend.fetch(id).ok_or(DeviceError::Tensor(id))
+                }
+                .await;
+
+                let device = backend.device.clone();
+                let queue = backend.queue.clone();
+                let future = async move {
+                    let data = data?;
+                    let (sender, receiver) = flume::bounded(0);
+                    wgpu::util::DownloadBuffer::read_buffer(
+                        &device,
+                        &queue,
+                        &data.slice(..),
+                        move |data| _ = sender.send(data),
+                    );
+
+                    #[cfg(not(target_arch = "wasm32"))]
+                    tokio::task::spawn_blocking(move || device.poll(wgpu::PollType::Wait));
+
+                    receiver
+                        .recv_async()
+                        .await?
+                        .map(|data| BackData(data.to_vec().into()))
+                        .map_err(DeviceError::from)
+                };
+                super::spawn(async move { _ = sender.send_async(future.await).await });
+            }
             DeviceEvent::Cleanup { retain } => {
                 let retain: HashSet<_> = retain
                     .into_iter()
                     .flat_map(|tape| tape.ops.into_iter().map(|op| op.id()))
                     .collect();
-                commit
-                    .lock()
-                    .expect("failed to lock")
-                    .retain(|id| retain.contains(id));
+                commit.retain(|id| retain.contains(id));
             }
         }
     }
