@@ -1,5 +1,6 @@
-use std::{borrow::Cow, cell::RefCell, collections::VecDeque, rc::Rc};
+use std::{borrow::Cow, cell::RefCell, collections::VecDeque, ops::Not, rc::Rc};
 
+use derive_more::{Deref, DerefMut};
 use itertools::Itertools;
 use rustc_hash::FxHashMap as HashMap;
 use thiserror::Error;
@@ -9,6 +10,9 @@ use crate::loom::{
     ops::{Access, BackendOp, TensorIr, TensorOp, TensorOpId},
     tensor::TensorId,
 };
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Deref, DerefMut)]
+pub struct StackId(pub usize);
 
 #[derive(Debug, Error)]
 pub enum AllocError {
@@ -20,12 +24,13 @@ pub enum AllocError {
 
 #[derive(Debug, Default, Clone)]
 pub struct Allocator {
+    stack: HashMap<TensorId, StackId>,
     alloc: HashMap<TensorId, TensorId>,
     free: HashMap<usize, VecDeque<TensorId>>,
 }
 
 impl Allocator {
-    /// Redirects `id` to its root and folds path. Returns the root `id`.
+    /// Redirects `id` to its root and folds path. Returns the root `id`. Allocates a new stack location if needed.
     pub fn redirect(&mut self, id: TensorId) -> TensorId {
         let mut root = id;
         while let Some(&parent) = self.alloc.get(&root) {
@@ -35,7 +40,22 @@ impl Allocator {
         if root != id {
             self.alloc.insert(id, root);
         }
+        self.stack
+            .contains_key(&root)
+            .not()
+            .then(|| self.push(root));
         root
+    }
+
+    /// Trace a tensor id down and retrieve its allocated stack location.
+    pub fn retrieve(&mut self, id: TensorId) -> StackId {
+        let id = self.redirect(id);
+        *self.stack.get(&id).expect("must have been allocated")
+    }
+
+    /// Push a tensor into the tensor stack.
+    fn push(&mut self, id: TensorId) {
+        _ = self.stack.insert(id, StackId(self.stack.len()))
     }
 
     /// Checks if mutation uniqueness rules applies.
