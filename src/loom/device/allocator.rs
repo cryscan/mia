@@ -31,7 +31,7 @@ pub struct Allocator {
 }
 
 impl Allocator {
-    /// Redirects `id` to its root and folds path. Returns the root `id`. Allocates a new stack location if needed.
+    /// Redirects `id` to its root and folds path. Returns the root `id`.
     pub fn redirect(&mut self, id: TensorId) -> TensorId {
         let mut root = id;
         while let Some(&parent) = self.alloc.get(&root) {
@@ -44,20 +44,18 @@ impl Allocator {
         root
     }
 
-    /// Trace a tensor id down and retrieve its allocated stack location.
+    /// Retrieve a tensor's allocated stack location.
+    /// Allocates a new stack location if needed.
     pub fn retrieve(&mut self, id: TensorId) -> StackId {
-        let id = self.redirect(id);
-        self.stack
-            .get(&id)
-            .copied()
-            .unwrap_or_else(|| self.push(id))
-    }
-
-    /// Push a tensor into the tensor stack.
-    fn push(&mut self, id: TensorId) -> StackId {
-        let stack = StackId(self.stack.len());
-        self.stack.insert(id, stack);
-        stack
+        let root = self.redirect(id);
+        match self.stack.get(&root) {
+            Some(&id) => id,
+            None => {
+                let id = StackId(self.stack.len());
+                self.stack.insert(root, id);
+                id
+            }
+        }
     }
 
     /// Checks if mutation uniqueness rules applies.
@@ -161,11 +159,6 @@ impl Allocator {
         self.check(&io)?;
 
         Ok(AllocOp { op, io })
-    }
-
-    #[inline]
-    pub fn reset(&mut self) {
-        *self = Default::default()
     }
 }
 
