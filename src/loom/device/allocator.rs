@@ -1,6 +1,6 @@
-use std::{borrow::Cow, cell::RefCell, collections::VecDeque, ops::Not, rc::Rc};
+use std::{borrow::Cow, cell::RefCell, collections::VecDeque, rc::Rc};
 
-use derive_more::{Deref, DerefMut};
+use derive_more::{Deref, DerefMut, Display};
 use itertools::Itertools;
 use rustc_hash::FxHashMap as HashMap;
 use thiserror::Error;
@@ -11,7 +11,8 @@ use crate::loom::{
     tensor::TensorId,
 };
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Deref, DerefMut)]
+#[derive(Debug, Default, Display, Clone, Copy, PartialEq, Eq, Hash, Deref, DerefMut)]
+#[display("{_0}")]
 pub struct StackId(pub usize);
 
 #[derive(Debug, Error)]
@@ -40,22 +41,23 @@ impl Allocator {
         if root != id {
             self.alloc.insert(id, root);
         }
-        self.stack
-            .contains_key(&root)
-            .not()
-            .then(|| self.push(root));
         root
     }
 
     /// Trace a tensor id down and retrieve its allocated stack location.
     pub fn retrieve(&mut self, id: TensorId) -> StackId {
         let id = self.redirect(id);
-        *self.stack.get(&id).expect("must have been allocated")
+        self.stack
+            .get(&id)
+            .copied()
+            .unwrap_or_else(|| self.push(id))
     }
 
     /// Push a tensor into the tensor stack.
-    fn push(&mut self, id: TensorId) {
-        _ = self.stack.insert(id, StackId(self.stack.len()))
+    fn push(&mut self, id: TensorId) -> StackId {
+        let stack = StackId(self.stack.len());
+        self.stack.insert(id, stack);
+        stack
     }
 
     /// Checks if mutation uniqueness rules applies.
@@ -206,6 +208,7 @@ mod tests {
 
     use itertools::Itertools;
 
+    use super::Allocator;
     use crate::loom::{
         device::{CpuBuilder, Device, DeviceEvent, cpu},
         layout::Layout,
@@ -214,16 +217,17 @@ mod tests {
         tensor::TensorId,
     };
 
-    fn check_ir(x: TensorIr, y: TensorIr) {
+    fn check_ir(allocator: &mut Allocator, x: TensorIr, y: TensorIr) {
         println!(
-            "{:<12}{:<8}{:<4}{}\t→\t{:<12}{:<8}{}",
+            "{:<12}{:<8}{:<4}{}\t→\t{:<12}{:<8}{}\t{}",
             format!("{}", x.access),
             format!("{}", x.r#type),
             x.count,
             x.id,
             format!("{}", y.access),
             format!("{}", y.r#type),
-            y.id
+            y.id,
+            allocator.retrieve(x.id),
         );
 
         // 1. data sizes must match
@@ -257,12 +261,12 @@ mod tests {
     }
 
     impl BackendOp<cpu::Backend> for PhonyBinaryOp {
-        fn execute(&self, _backend: &mut cpu::Backend, io: Vec<TensorIr>) {
+        fn execute(&self, backend: &mut cpu::Backend, io: Vec<TensorIr>) {
             println!("{}", self.name());
             self.io()
                 .into_iter()
                 .zip_eq(io)
-                .for_each(|(x, y)| check_ir(x, y));
+                .for_each(|(x, y)| check_ir(backend.as_mut(), x, y));
             println!();
         }
     }
@@ -285,12 +289,12 @@ mod tests {
     }
 
     impl BackendOp<cpu::Backend> for PhonyUnaryOp {
-        fn execute(&self, _backend: &mut cpu::Backend, io: Vec<TensorIr>) {
+        fn execute(&self, backend: &mut cpu::Backend, io: Vec<TensorIr>) {
             println!("{}", self.name());
             self.io()
                 .into_iter()
                 .zip_eq(io)
-                .for_each(|(x, y)| check_ir(x, y));
+                .for_each(|(x, y)| check_ir(backend.as_mut(), x, y));
             println!();
         }
     }

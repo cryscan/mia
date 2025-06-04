@@ -1,5 +1,6 @@
 use std::{any::TypeId, sync::Arc};
 
+use derive_more::{AsMut, AsRef};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use thiserror::Error;
 
@@ -13,7 +14,7 @@ use crate::loom::{
 };
 
 #[allow(unused)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, AsRef, AsMut)]
 pub struct Backend {
     /// Handle to a WebGPU compute device.
     device: wgpu::Device,
@@ -21,6 +22,10 @@ pub struct Backend {
     queue: wgpu::Queue,
     /// Operators that the device is able to execute.
     ops: OpVTable<Self>,
+    /// Allocator that tracks buffer renaming.
+    #[as_ref]
+    #[as_mut]
+    allocator: Allocator,
     /// Pool of GPU buffers.
     buffers: HashMap<TensorId, wgpu::Buffer>,
     /// Kernel launches and uploads issued by executing a tape of ops.
@@ -145,12 +150,15 @@ impl GpuBuilder {
                 trace: wgpu::Trace::Off,
             })
             .await?;
+
+        let allocator = Allocator::default();
         let buffers = HashMap::default();
         let launches = Vec::new();
 
         let (sender, receiver) = flume::unbounded();
         let backend = Backend {
             ops,
+            allocator,
             device,
             queue,
             buffers,
@@ -205,7 +213,6 @@ pub struct Upload {
 
 async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
     let mut commit = HashSet::default();
-    let mut allocator = Allocator::default();
 
     while let Ok(event) = receiver.recv_async().await {
         match event {
@@ -217,7 +224,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         .filter(|op| !commit.contains(&op.id()))
                         .collect();
                     for op in ops {
-                        let op = allocator.alloc(op)?;
+                        let op = backend.as_mut().alloc(op)?;
                         let io = op.io();
                         let id = op.id();
                         backend.execute(&op, io);
@@ -236,7 +243,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         .filter(|op| !commit.contains(&op.id()))
                         .collect();
                     for op in ops {
-                        let op = allocator.alloc(op)?;
+                        let op = backend.as_mut().alloc(op)?;
                         let io = op.io();
                         let id = op.id();
                         backend.execute(&op, io);
@@ -276,7 +283,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                     .flat_map(|tape| tape.ops.into_iter().map(|op| op.id()))
                     .collect();
                 commit.retain(|id| retain.contains(id));
-                allocator.reset();
+                backend.as_mut().reset();
             }
         }
     }
