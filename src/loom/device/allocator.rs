@@ -1,4 +1,4 @@
-use std::{borrow::Cow, cell::RefCell, collections::VecDeque, rc::Rc};
+use std::{borrow::Cow, cell::RefCell, collections::VecDeque};
 
 use derive_more::{Deref, DerefMut, Display};
 use itertools::Itertools;
@@ -89,7 +89,7 @@ impl Allocator {
         self.check(&io)?;
 
         // 0. convert to shared ref with internal mutability
-        let io = io.into_iter().map(RefCell::new).map(Rc::new).collect_vec();
+        let io = io.into_iter().map(RefCell::new).collect_vec();
 
         // 1. substitute tensor ids following the redirection map
         for ir in io.iter() {
@@ -102,7 +102,6 @@ impl Allocator {
             .iter()
             .filter(|ir| matches!(ir.borrow().access, Access::ReadOnly))
             .filter(|ir| ir.borrow().count <= 1)
-            .cloned()
             .collect_vec();
 
         // 3. reuse tensors from the local free list
@@ -150,10 +149,7 @@ impl Allocator {
             self.free.insert(size, ids);
         }
 
-        let io = io
-            .into_iter()
-            .map(|ir| Rc::into_inner(ir).unwrap().into_inner())
-            .collect_vec();
+        let io = io.into_iter().map(|ir| ir.into_inner()).collect_vec();
 
         // check for reused free ids
         self.check(&io)?;
