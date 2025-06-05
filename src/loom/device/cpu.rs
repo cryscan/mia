@@ -175,13 +175,21 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                 _ = sender.send_async(data).await
             }
             DeviceEvent::Cleanup { retain } => {
-                let retain: HashSet<_> = retain
-                    .into_iter()
-                    .flat_map(|tape| tape.ops.into_iter().map(|op| op.id()))
+                // remove all buffers in the stack unless retained
+                let f = |ir: TensorIr| backend.allocator().retrieve(ir.id);
+                let f = |op: &dyn TensorOp| op.io().into_iter().map(f);
+                let ids: HashSet<_> = retain
+                    .iter()
+                    .flat_map(|tape| tape.ops.iter().map(AsRef::as_ref).flat_map(f))
                     .collect();
-                commit.retain(|id| retain.contains(id));
-                // std::mem::take(&mut backend.allocator);
-                // std::mem::take(&mut backend.buffers);
+                backend.buffers.retain(|id, _| ids.contains(id));
+
+                // remove all committed ops unless retained
+                let ids: HashSet<_> = retain
+                    .iter()
+                    .flat_map(|tape| tape.ops.iter().map(|op| op.id()))
+                    .collect();
+                commit.retain(|id| ids.contains(id));
             }
         }
     }
