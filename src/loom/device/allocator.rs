@@ -259,7 +259,7 @@ mod tests {
             self.io()
                 .into_iter()
                 .zip_eq(io)
-                .for_each(|(x, y)| check_ir(backend.as_mut(), x, y));
+                .for_each(|(x, y)| check_ir(&mut backend.allocator(), x, y));
             println!();
         }
     }
@@ -287,7 +287,7 @@ mod tests {
             self.io()
                 .into_iter()
                 .zip_eq(io)
-                .for_each(|(x, y)| check_ir(backend.as_mut(), x, y));
+                .for_each(|(x, y)| check_ir(&mut backend.allocator(), x, y));
             println!();
         }
     }

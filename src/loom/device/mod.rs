@@ -54,7 +54,7 @@ pub enum DeviceEvent {
     },
 }
 
-pub trait Backend: Send + Sync {
+pub trait Backend {
     type Data;
 
     /// Dynamically dispatch to actual `op`'s execution, using given `io`.
@@ -64,7 +64,7 @@ pub trait Backend: Send + Sync {
     /// Allocate a buffer for tensor of `id`.
     fn alloc(&mut self, id: TensorId, size: usize) -> Self::Data;
     /// Get the buffer of tensor of `id`. Returns [`None`] if not found.
-    fn fetch(&mut self, id: TensorId) -> Option<Self::Data>;
+    fn fetch(&self, id: TensorId) -> Option<Self::Data>;
 }
 
 type OpVTable<B> = HashMap<TypeId, fn(&mut B, &dyn TensorOp, Vec<TensorIr>)>;

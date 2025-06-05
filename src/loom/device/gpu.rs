@@ -1,6 +1,9 @@
-use std::{any::TypeId, sync::Arc};
+use std::{
+    any::TypeId,
+    cell::{RefCell, RefMut},
+    sync::Arc,
+};
 
-use derive_more::{AsMut, AsRef};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use thiserror::Error;
 
@@ -14,7 +17,7 @@ use crate::loom::{
 };
 
 #[allow(unused)]
-#[derive(Debug, Clone, AsRef, AsMut)]
+#[derive(Debug)]
 pub struct Backend {
     /// Handle to a WebGPU compute device.
     device: wgpu::Device,
@@ -23,9 +26,7 @@ pub struct Backend {
     /// Operators that the device is able to execute.
     ops: OpVTable<Self>,
     /// Allocator that tracks buffer renaming.
-    #[as_ref]
-    #[as_mut]
-    allocator: Allocator,
+    allocator: RefCell<Allocator>,
     /// Stack of GPU buffers.
     buffers: HashMap<StackId, wgpu::Buffer>,
     /// Kernel launches and uploads issued by executing a tape of ops.
@@ -47,7 +48,7 @@ impl super::Backend for Backend {
     #[inline]
     fn create(&mut self, id: TensorId, contents: &[u8]) -> Self::Data {
         use wgpu::util::DeviceExt;
-        let id = self.allocator.retrieve(id);
+        let id = self.allocator().retrieve(id);
         let data = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -63,7 +64,7 @@ impl super::Backend for Backend {
 
     #[inline]
     fn alloc(&mut self, id: TensorId, size: usize) -> Self::Data {
-        let id = self.allocator.retrieve(id);
+        let id = self.allocator().retrieve(id);
         let data = self
             .buffers
             .get(&id)
@@ -85,9 +86,16 @@ impl super::Backend for Backend {
     }
 
     #[inline]
-    fn fetch(&mut self, id: TensorId) -> Option<Self::Data> {
-        let id = self.allocator.retrieve(id);
+    fn fetch(&self, id: TensorId) -> Option<Self::Data> {
+        let id = self.allocator().retrieve(id);
         self.buffers.get(&id).cloned()
+    }
+}
+
+impl Backend {
+    #[inline]
+    pub fn allocator(&self) -> RefMut<Allocator> {
+        self.allocator.borrow_mut()
     }
 }
 
@@ -154,7 +162,7 @@ impl GpuBuilder {
             })
             .await?;
 
-        let allocator = Allocator::default();
+        let allocator = RefCell::new(Allocator::default());
         let buffers = HashMap::default();
         let launches = Vec::new();
 
@@ -227,7 +235,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         .filter(|op| !commit.contains(&op.id()))
                         .collect();
                     for op in ops {
-                        let op = backend.allocator.alloc(op)?;
+                        let op = backend.allocator().alloc(op)?;
                         let io = op.io();
                         let id = op.id();
                         backend.execute(&op, io);
@@ -246,7 +254,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         .filter(|op| !commit.contains(&op.id()))
                         .collect();
                     for op in ops {
-                        let op = backend.allocator.alloc(op)?;
+                        let op = backend.allocator().alloc(op)?;
                         let io = op.io();
                         let id = op.id();
                         backend.execute(&op, io);

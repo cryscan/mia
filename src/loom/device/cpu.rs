@@ -1,6 +1,9 @@
-use std::{any::TypeId, sync::Arc};
+use std::{
+    any::TypeId,
+    cell::{RefCell, RefMut},
+    sync::Arc,
+};
 
-use derive_more::{AsMut, AsRef};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use super::{
@@ -13,14 +16,12 @@ use crate::loom::{
 };
 
 #[allow(unused)]
-#[derive(Debug, Clone, AsRef, AsMut)]
+#[derive(Debug)]
 pub struct Backend {
     /// Operators that the device is able to execute.
     ops: OpVTable<Self>,
     /// Allocator that tracks buffer renaming.
-    #[as_ref]
-    #[as_mut]
-    allocator: Allocator,
+    allocator: RefCell<Allocator>,
     /// Stack of CPU buffers.
     buffers: HashMap<StackId, Arc<[u8]>>,
 }
@@ -39,7 +40,7 @@ impl super::Backend for Backend {
 
     #[inline]
     fn create(&mut self, id: TensorId, contents: &[u8]) -> Self::Data {
-        let id = self.allocator.retrieve(id);
+        let id = self.allocator().retrieve(id);
         let data: Self::Data = contents.to_vec().into();
         self.buffers.insert(id, data.clone());
         data
@@ -47,7 +48,7 @@ impl super::Backend for Backend {
 
     #[inline]
     fn alloc(&mut self, id: TensorId, size: usize) -> Self::Data {
-        let id = self.allocator.retrieve(id);
+        let id = self.allocator().retrieve(id);
         let data = self
             .buffers
             .get(&id)
@@ -62,9 +63,16 @@ impl super::Backend for Backend {
     }
 
     #[inline]
-    fn fetch(&mut self, id: TensorId) -> Option<Self::Data> {
-        let id = self.allocator.retrieve(id);
+    fn fetch(&self, id: TensorId) -> Option<Self::Data> {
+        let id = self.allocator().retrieve(id);
         self.buffers.get(&id).cloned()
+    }
+}
+
+impl Backend {
+    #[inline]
+    pub fn allocator(&self) -> RefMut<Allocator> {
+        self.allocator.borrow_mut()
     }
 }
 
@@ -95,7 +103,7 @@ impl CpuBuilder {
 
     pub async fn build(self) -> Cpu {
         let ops = self.ops;
-        let allocator = Allocator::default();
+        let allocator = RefCell::new(Allocator::default());
         let buffers = HashMap::default();
 
         let (sender, receiver) = flume::unbounded();
@@ -134,7 +142,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         .filter(|op| !commit.contains(&op.id()))
                         .collect();
                     for op in ops {
-                        let op = backend.allocator.alloc(op)?;
+                        let op = backend.allocator().alloc(op)?;
                         let io = op.io();
                         let id = op.id();
                         backend.execute(&op, io);
@@ -153,7 +161,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         .filter(|op| !commit.contains(&op.id()))
                         .collect();
                     for op in ops {
-                        let op = backend.allocator.alloc(op)?;
+                        let op = backend.allocator().alloc(op)?;
                         let io = op.io();
                         let id = op.id();
                         backend.execute(&op, io);
