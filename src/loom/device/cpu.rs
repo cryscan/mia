@@ -12,11 +12,11 @@ use super::{
 };
 use crate::loom::{
     ops::{BackendOp, TensorIr, TensorOp},
+    platform,
     tensor::TensorId,
 };
 
 #[allow(unused)]
-#[derive(Debug)]
 pub struct Backend {
     /// Operators that the device is able to execute.
     ops: OpVTable<Self>,
@@ -30,10 +30,10 @@ impl super::Backend for Backend {
     type Data = Arc<[u8]>;
 
     #[inline]
-    fn execute(&mut self, op: &dyn TensorOp, io: Vec<TensorIr>) {
+    async fn execute(&mut self, op: &dyn TensorOp, io: Vec<TensorIr>) {
         let id = &op.type_id();
-        match self.ops.get(id) {
-            Some(f) => f(self, op, io),
+        match self.ops.get(id).cloned() {
+            Some(f) => f(self, op, io).await,
             None => log::error!("unable to execute op of type {}", op.name()),
         }
     }
@@ -91,7 +91,7 @@ impl Device for Cpu {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Default)]
 pub struct CpuBuilder {
     pub ops: OpVTable<Backend>,
 }
@@ -112,19 +112,22 @@ impl CpuBuilder {
             allocator,
             buffers,
         };
-        super::spawn(serve(backend, receiver));
+        platform::spawn(serve(backend, receiver));
 
         let id = Default::default();
         Cpu { id, sender }
     }
 
-    pub fn add_op<Op: TensorOp + BackendOp<Backend>>(mut self) -> Self {
-        let id = TypeId::of::<Op>();
-        let f = |backend: &mut Backend, op: &dyn TensorOp, io| match op.downcast_ref::<Op>() {
-            Some(op) => op.execute(backend, io),
-            None => unreachable!(),
-        };
-        self.ops.insert(id, f);
+    pub fn add_op<Op>(mut self) -> Self
+    where
+        Op: TensorOp + BackendOp<Backend>,
+    {
+        self.ops.insert(TypeId::of::<Op>(), |backend, op, io| {
+            match op.downcast_ref::<Op>() {
+                Some(op) => Box::pin(op.execute(backend, io)),
+                None => unreachable!(),
+            }
+        });
         self
     }
 }
@@ -145,7 +148,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         let op = backend.allocator().alloc(op)?;
                         let io = op.io();
                         let id = op.id();
-                        backend.execute(&op, io);
+                        backend.execute(&op, io).await;
                         commit.insert(id);
                     }
                     Ok(tape.id)
@@ -164,13 +167,14 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         let op = backend.allocator().alloc(op)?;
                         let io = op.io();
                         let id = op.id();
-                        backend.execute(&op, io);
+                        backend.execute(&op, io).await;
                         commit.insert(id);
                     }
                     let id = tape.id;
                     backend.fetch(id).ok_or(DeviceError::Tensor(id))
                 }
                 .await
+                .map(|x| x.to_vec().into_boxed_slice())
                 .map(BackData);
                 _ = sender.send_async(data).await
             }

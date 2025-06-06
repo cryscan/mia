@@ -1,4 +1,4 @@
-use std::{any::TypeId, sync::Arc};
+use std::any::TypeId;
 
 use derive_more::{Deref, DerefMut};
 use rustc_hash::FxHashMap as HashMap;
@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use super::{
     ops::{TensorIr, TensorOp, TensorTape},
+    platform::BoxFuture,
     tensor::TensorId,
 };
 
@@ -37,7 +38,7 @@ pub enum DeviceError {
 }
 
 #[derive(Debug, Clone, Deref, DerefMut)]
-pub struct BackData(pub Arc<[u8]>);
+pub struct BackData(pub Box<[u8]>);
 
 #[derive(Debug, Clone)]
 pub enum DeviceEvent {
@@ -54,11 +55,12 @@ pub enum DeviceEvent {
     },
 }
 
+#[cfg_attr(not(feature = "web"), trait_variant::make(Send))]
 pub trait Backend {
     type Data;
 
     /// Dynamically dispatch to actual `op`'s execution, using given `io`.
-    fn execute(&mut self, op: &dyn TensorOp, io: Vec<TensorIr>);
+    async fn execute(&mut self, op: &dyn TensorOp, io: Vec<TensorIr>);
     /// Create a buffer for tensor of `id`.
     fn create(&mut self, id: TensorId, contents: &[u8]) -> Self::Data;
     /// Allocate a buffer for tensor of `id`.
@@ -67,28 +69,10 @@ pub trait Backend {
     fn fetch(&self, id: TensorId) -> Option<Self::Data>;
 }
 
-type OpVTable<B> = HashMap<TypeId, fn(&mut B, &dyn TensorOp, Vec<TensorIr>)>;
+type OpVTable<B> =
+    HashMap<TypeId, for<'a> fn(&'a mut B, &'a dyn TensorOp, Vec<TensorIr>) -> BoxFuture<'a, ()>>;
 
-#[cfg(not(target_arch = "wasm32"))]
-#[inline]
-fn spawn<O, F>(future: F) -> tokio::task::JoinHandle<O>
-where
-    O: Send + 'static,
-    F: std::future::Future<Output = O> + Send + 'static,
-{
-    tokio::spawn(future)
-}
-
-#[cfg(target_arch = "wasm32")]
-#[inline]
-fn spawn<F>(future: F)
-where
-    F: std::future::Future<Output = ()> + 'static,
-{
-    wasm_bindgen_futures::spawn_local(future);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 #[cfg(test)]
 mod tests {
     use std::error::Error;
@@ -112,7 +96,7 @@ mod tests {
         }
 
         impl<const N: usize> BackendOp<cpu::Backend> for PhonyOp<N> {
-            fn execute(&self, _backend: &mut cpu::Backend, _io: Vec<TensorIr>) {
+            async fn execute(&self, _backend: &mut cpu::Backend, _io: Vec<TensorIr>) {
                 println!("{}", self.name())
             }
         }

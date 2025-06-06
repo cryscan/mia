@@ -107,8 +107,9 @@ impl std::fmt::Debug for dyn TensorOp {
 }
 
 /// Implemented for each [`Device`] for each [`TensorOp`].
+#[cfg_attr(not(feature = "web"), trait_variant::make(Send))]
 pub trait BackendOp<B: Backend> {
-    fn execute(&self, backend: &mut B, io: Vec<TensorIr>);
+    async fn execute(&self, backend: &mut B, io: Vec<TensorIr>);
 }
 
 /// Records operators a tensor has experienced.

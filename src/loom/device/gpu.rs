@@ -13,11 +13,11 @@ use super::{
 };
 use crate::loom::{
     ops::{BackendOp, TensorIr, TensorOp},
+    platform,
     tensor::TensorId,
 };
 
 #[allow(unused)]
-#[derive(Debug)]
 pub struct Backend {
     /// Handle to a WebGPU compute device.
     device: wgpu::Device,
@@ -37,10 +37,10 @@ impl super::Backend for Backend {
     type Data = wgpu::Buffer;
 
     #[inline]
-    fn execute(&mut self, op: &dyn TensorOp, io: Vec<TensorIr>) {
+    async fn execute(&mut self, op: &dyn TensorOp, io: Vec<TensorIr>) {
         let id = &op.type_id();
-        match self.ops.get(id) {
-            Some(f) => f(self, op, io),
+        match self.ops.get(id).cloned() {
+            Some(f) => f(self, op, io).await,
             None => log::error!("unable to execute op of type {}", op.name()),
         }
     }
@@ -114,7 +114,6 @@ impl Device for Gpu {
     }
 }
 
-#[derive(Debug, Clone)]
 pub struct GpuBuilder {
     pub adapter: wgpu::Adapter,
     pub features: wgpu::Features,
@@ -175,7 +174,7 @@ impl GpuBuilder {
             buffers,
             launches,
         };
-        super::spawn(serve(backend, receiver));
+        platform::spawn(serve(backend, receiver));
 
         let id = Default::default();
         let device = Gpu { id, sender };
@@ -192,13 +191,16 @@ impl GpuBuilder {
         self
     }
 
-    pub fn add_op<Op: TensorOp + BackendOp<Backend>>(mut self) -> Self {
-        let id = TypeId::of::<Op>();
-        let f = |backend: &mut Backend, op: &dyn TensorOp, io| match op.downcast_ref::<Op>() {
-            Some(op) => op.execute(backend, io),
-            None => unreachable!(),
-        };
-        self.ops.insert(id, f);
+    pub fn add_op<Op>(mut self) -> Self
+    where
+        Op: TensorOp + BackendOp<Backend>,
+    {
+        self.ops.insert(TypeId::of::<Op>(), |backend, op, io| {
+            match op.downcast_ref::<Op>() {
+                Some(op) => Box::pin(op.execute(backend, io)),
+                None => unreachable!(),
+            }
+        });
         self
     }
 }
@@ -238,7 +240,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         let op = backend.allocator().alloc(op)?;
                         let io = op.io();
                         let id = op.id();
-                        backend.execute(&op, io);
+                        backend.execute(&op, io).await;
                         commit.insert(id);
                     }
                     Ok(tape.id)
@@ -257,7 +259,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         let op = backend.allocator().alloc(op)?;
                         let io = op.io();
                         let id = op.id();
-                        backend.execute(&op, io);
+                        backend.execute(&op, io).await;
                         commit.insert(id);
                     }
                     let id = tape.id;
@@ -277,7 +279,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         move |data| _ = sender.send(data),
                     );
 
-                    #[cfg(not(target_arch = "wasm32"))]
+                    #[cfg(not(feature = "web"))]
                     tokio::task::spawn_blocking(move || device.poll(wgpu::PollType::Wait));
 
                     receiver
@@ -286,7 +288,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         .map(|data| BackData(data.to_vec().into()))
                         .map_err(DeviceError::from)
                 };
-                super::spawn(async move { _ = sender.send_async(future.await).await });
+                platform::spawn(async move { _ = sender.send_async(future.await).await });
             }
             DeviceEvent::Cleanup { retain } => {
                 // remove all buffers in the stack unless retained

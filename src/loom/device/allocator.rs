@@ -185,12 +185,12 @@ impl TensorOp for AllocOp {
 }
 
 impl<B: Backend> BackendOp<B> for AllocOp {
-    fn execute(&self, backend: &mut B, io: Vec<TensorIr>) {
-        backend.execute(self.op.as_ref(), io);
+    async fn execute(&self, backend: &mut B, io: Vec<TensorIr>) {
+        backend.execute(self.op.as_ref(), io).await;
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 #[cfg(test)]
 mod tests {
     use std::error::Error;
@@ -250,7 +250,7 @@ mod tests {
     }
 
     impl BackendOp<cpu::Backend> for PhonyBinaryOp {
-        fn execute(&self, backend: &mut cpu::Backend, io: Vec<TensorIr>) {
+        async fn execute(&self, backend: &mut cpu::Backend, io: Vec<TensorIr>) {
             println!("{}", self.name());
             self.io()
                 .into_iter()
@@ -278,7 +278,7 @@ mod tests {
     }
 
     impl BackendOp<cpu::Backend> for PhonyUnaryOp {
-        fn execute(&self, backend: &mut cpu::Backend, io: Vec<TensorIr>) {
+        async fn execute(&self, backend: &mut cpu::Backend, io: Vec<TensorIr>) {
             println!("{}", self.name());
             self.io()
                 .into_iter()
