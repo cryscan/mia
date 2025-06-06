@@ -69,8 +69,8 @@ pub trait Backend {
     fn fetch(&self, id: TensorId) -> Option<Self::Data>;
 }
 
-type OpVTable<B> =
-    HashMap<TypeId, for<'a> fn(&'a mut B, &'a dyn TensorOp, Vec<TensorIr>) -> BoxFuture<'a, ()>>;
+type OpFn<B> = for<'a> fn(&'a mut B, &'a dyn TensorOp, Vec<TensorIr>) -> BoxFuture<'a, ()>;
+type OpVTable<B> = HashMap<TypeId, OpFn<B>>;
 
 #[cfg(test)]
 mod tests {

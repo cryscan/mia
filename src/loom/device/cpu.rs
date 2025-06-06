@@ -1,7 +1,8 @@
 use std::{
     any::TypeId,
     cell::{RefCell, RefMut},
-    sync::Arc,
+    ops::{Deref, DerefMut},
+    sync::{Arc, RwLock},
 };
 
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
@@ -16,6 +17,37 @@ use crate::loom::{
     tensor::TensorId,
 };
 
+#[derive(Debug, Clone)]
+pub struct Buffer(Arc<RwLock<Box<[u8]>>>);
+
+impl From<Vec<u8>> for Buffer {
+    fn from(value: Vec<u8>) -> Self {
+        Self(Arc::new(RwLock::new(value.into_boxed_slice())))
+    }
+}
+
+impl Buffer {
+    #[inline]
+    pub fn new(contents: &[u8]) -> Self {
+        contents.to_vec().into()
+    }
+
+    #[inline]
+    pub fn read(&self) -> impl Deref<Target = Box<[u8]>> {
+        self.0.read().expect("failed to lock buffer")
+    }
+
+    #[inline]
+    pub fn write(&self) -> impl DerefMut<Target = Box<[u8]>> {
+        self.0.write().expect("failed to lock buffer")
+    }
+
+    #[inline]
+    pub fn into_inner(self) -> Box<[u8]> {
+        self.read().to_vec().into_boxed_slice()
+    }
+}
+
 #[allow(unused)]
 pub struct Backend {
     /// Operators that the device is able to execute.
@@ -23,11 +55,11 @@ pub struct Backend {
     /// Allocator that tracks buffer renaming.
     allocator: RefCell<Allocator>,
     /// Stack of CPU buffers.
-    buffers: HashMap<StackId, Arc<[u8]>>,
+    buffers: HashMap<StackId, Buffer>,
 }
 
 impl super::Backend for Backend {
-    type Data = Arc<[u8]>;
+    type Data = Buffer;
 
     #[inline]
     async fn execute(&mut self, op: &dyn TensorOp, io: Vec<TensorIr>) {
@@ -41,7 +73,7 @@ impl super::Backend for Backend {
     #[inline]
     fn create(&mut self, id: TensorId, contents: &[u8]) -> Self::Data {
         let id = self.allocator().retrieve(id);
-        let data: Self::Data = contents.to_vec().into();
+        let data = Self::Data::new(contents);
         self.buffers.insert(id, data.clone());
         data
     }
@@ -53,7 +85,7 @@ impl super::Backend for Backend {
             .buffers
             .get(&id)
             .cloned()
-            .filter(|data| data.len() == size);
+            .filter(|data| data.read().len() == size);
         let data = match data {
             Some(data) => data,
             None => vec![0; size].into(),
@@ -174,7 +206,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                     backend.fetch(id).ok_or(DeviceError::Tensor(id))
                 }
                 .await
-                .map(|x| x.to_vec().into_boxed_slice())
+                .map(Buffer::into_inner)
                 .map(BackData);
                 _ = sender.send_async(data).await
             }
