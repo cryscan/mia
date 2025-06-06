@@ -107,7 +107,7 @@ impl std::fmt::Debug for dyn TensorOp {
 }
 
 /// Implemented for each [`Device`] for each [`TensorOp`].
-#[cfg_attr(not(feature = "web"), trait_variant::make(Send))]
+#[cfg_attr(not(target_arch = "wasm32"), trait_variant::make(Send))]
 pub trait BackendOp<B: Backend> {
     async fn execute(&self, backend: &mut B, io: Vec<TensorIr>);
 }

@@ -29,12 +29,12 @@ version.workspace = true
 bytemuck = { version = "1.21", features = ["extern_crate_alloc"] }
 casey = "0.4.2"
 derive_more = { version = "2.0.1", features = [
+    "as_ref",
     "deref",
     "deref_mut",
     "display",
     "from",
     "into",
-    "as_ref"
 ] }
 dyn-clone = "1.0.19"
 flume = "0.11"
@@ -57,7 +57,7 @@ tracing-tracy = { version = "0.11.4", optional = true }
 trait-variant = "0.1.2"
 u4 = "0.1.2"
 uid = "0.1"
-uuid = { version = "1.17.0", features = ["bytemuck", "v4"] }
+uuid = { version = "1.17.0", features = ["bytemuck", "v4", "js"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 wgpu = "25.0"
@@ -71,13 +71,14 @@ default-features = false
 features = ["macros", "rt", "sync", "time"]
 version = "1.45"
 
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
 [features]
 default = ["native"]
 
 ## Enables on native platforms.
 native = ["subgroup-ops", "tokio/rt-multi-thread"]
-## Enables only for the WASM platform.
-web = []
 ## Enables `serde` on types.
 serde = [
     "dep:serde",

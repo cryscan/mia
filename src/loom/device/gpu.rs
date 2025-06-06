@@ -276,17 +276,17 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         &device,
                         &queue,
                         &data.slice(..),
-                        move |data| _ = sender.send(data),
+                        move |data| {
+                            let data = data
+                                .map(|data| data.to_vec().into_boxed_slice())
+                                .map(BackData)
+                                .map_err(DeviceError::from);
+                            _ = sender.send(data)
+                        },
                     );
-
-                    #[cfg(not(feature = "web"))]
+                    #[cfg(not(target_arch = "wasm32"))]
                     tokio::task::spawn_blocking(move || device.poll(wgpu::PollType::Wait));
-
-                    receiver
-                        .recv_async()
-                        .await?
-                        .map(|data| BackData(data.to_vec().into()))
-                        .map_err(DeviceError::from)
+                    receiver.recv_async().await?
                 };
                 platform::spawn(async move { _ = sender.send_async(future.await).await });
             }

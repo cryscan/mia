@@ -55,7 +55,7 @@ pub enum DeviceEvent {
     },
 }
 
-#[cfg_attr(not(feature = "web"), trait_variant::make(Send))]
+#[cfg_attr(not(target_arch = "wasm32"), trait_variant::make(Send))]
 pub trait Backend {
     type Data;
 
@@ -72,7 +72,6 @@ pub trait Backend {
 type OpVTable<B> =
     HashMap<TypeId, for<'a> fn(&'a mut B, &'a dyn TensorOp, Vec<TensorIr>) -> BoxFuture<'a, ()>>;
 
-#[cfg(not(feature = "web"))]
 #[cfg(test)]
 mod tests {
     use std::error::Error;

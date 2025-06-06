@@ -190,7 +190,6 @@ impl<B: Backend> BackendOp<B> for AllocOp {
     }
 }
 
-#[cfg(not(feature = "web"))]
 #[cfg(test)]
 mod tests {
     use std::error::Error;

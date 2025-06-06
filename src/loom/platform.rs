@@ -1,4 +1,4 @@
-#[cfg(not(feature = "web"))]
+#[cfg(not(target_arch = "wasm32"))]
 #[inline]
 pub fn spawn<O, F>(future: F) -> tokio::task::JoinHandle<O>
 where
@@ -8,7 +8,7 @@ where
     tokio::spawn(future)
 }
 
-#[cfg(feature = "web")]
+#[cfg(target_arch = "wasm32")]
 #[inline]
 pub fn spawn<F>(future: F)
 where
@@ -17,7 +17,7 @@ where
     wasm_bindgen_futures::spawn_local(future);
 }
 
-#[cfg(not(feature = "web"))]
+#[cfg(not(target_arch = "wasm32"))]
 pub type BoxFuture<'a, T> = futures::future::BoxFuture<'a, T>;
-#[cfg(feature = "web")]
+#[cfg(target_arch = "wasm32")]
 pub type BoxFuture<'a, T> = futures::future::LocalBoxFuture<'a, T>;
