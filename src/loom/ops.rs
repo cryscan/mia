@@ -10,6 +10,7 @@ use super::{
     device::{Backend, Device},
     layout::Layout,
     num::{DataType, Scalar},
+    slice::Slice,
     tensor::{Tensor, TensorId},
 };
 
@@ -25,6 +26,7 @@ pub enum Access {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TensorIr {
     pub layout: Layout,
+    pub slice: Slice,
     pub r#type: DataType,
     pub id: TensorId,
     pub count: usize,
@@ -52,11 +54,13 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
     #[inline]
     pub fn ir(&self, access: Access) -> TensorIr {
         let layout = self.layout();
+        let slice = Slice::from_layout(layout.clone());
         let r#type = T::DATA_TYPE;
         let count = self.ref_count();
         let id = self.id();
         TensorIr {
             layout,
+            slice,
             r#type,
             id,
             count,

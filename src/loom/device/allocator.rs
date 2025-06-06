@@ -202,6 +202,7 @@ mod tests {
         layout::Layout,
         num::DataType,
         ops::{Access, BackendOp, TensorIr, TensorOp, TensorOpId, TensorTape},
+        slice::Slice,
         tensor::TensorId,
     };
 
@@ -312,6 +313,7 @@ mod tests {
                 input: [
                     TensorIr {
                         layout: Layout::from_shape([32]),
+                        slice: Slice::from(..),
                         r#type: DataType::F32x4,
                         id: ID_MAP[0],
                         count: 1,
@@ -319,6 +321,7 @@ mod tests {
                     },
                     TensorIr {
                         layout: Layout::from_shape([32]),
+                        slice: Slice::from(..),
                         r#type: DataType::F16x4,
                         id: ID_MAP[1],
                         count: 1,
@@ -327,6 +330,7 @@ mod tests {
                 ],
                 output: TensorIr {
                     layout: Layout::from_shape([32]),
+                    slice: Slice::from(..),
                     r#type: DataType::F16x4,
                     id: ID_MAP[2],
                     count: 1,
@@ -338,6 +342,7 @@ mod tests {
                 input: [
                     TensorIr {
                         layout: Layout::from_shape([32]),
+                        slice: Slice::from(..),
                         r#type: DataType::F32x4,
                         id: ID_MAP[2],
                         count: 2,
@@ -345,6 +350,7 @@ mod tests {
                     },
                     TensorIr {
                         layout: Layout::from_shape([32]),
+                        slice: Slice::from(..),
                         r#type: DataType::F16x4,
                         id: ID_MAP[3],
                         count: 1,
@@ -353,6 +359,7 @@ mod tests {
                 ],
                 output: TensorIr {
                     layout: Layout::from_shape([32]),
+                    slice: Slice::from(..),
                     r#type: DataType::F32x4,
                     id: ID_MAP[4],
                     count: 1,
@@ -364,6 +371,7 @@ mod tests {
                 input: [
                     TensorIr {
                         layout: Layout::from_shape([32]),
+                        slice: Slice::from(..),
                         r#type: DataType::F32x4,
                         id: ID_MAP[4],
                         count: 1,
@@ -371,6 +379,7 @@ mod tests {
                     },
                     TensorIr {
                         layout: Layout::from_shape([32]),
+                        slice: Slice::from(..),
                         r#type: DataType::F32x4,
                         id: ID_MAP[2],
                         count: 2,
@@ -379,6 +388,7 @@ mod tests {
                 ],
                 output: TensorIr {
                     layout: Layout::from_shape([32]),
+                    slice: Slice::from(..),
                     r#type: DataType::F32x4,
                     id: ID_MAP[5],
                     count: 1,
@@ -389,6 +399,7 @@ mod tests {
                 id: Default::default(),
                 input: TensorIr {
                     layout: Layout::from_shape([32]),
+                    slice: Slice::from(..),
                     r#type: DataType::F32x4,
                     id: ID_MAP[2],
                     count: 1,
@@ -396,6 +407,7 @@ mod tests {
                 },
                 output: TensorIr {
                     layout: Layout::from_shape([32]),
+                    slice: Slice::from(..),
                     r#type: DataType::F32x4,
                     id: ID_MAP[6],
                     count: 1,
