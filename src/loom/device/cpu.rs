@@ -64,7 +64,7 @@ impl super::Backend for Backend {
     #[inline]
     async fn execute(&mut self, op: &dyn TensorOp, io: Vec<TensorIr>) {
         let id = &op.type_id();
-        match self.ops.get(id).cloned() {
+        match self.ops.get(id) {
             Some(f) => f(self, op, io).await,
             None => log::error!("unable to execute op of type {}", op.name()),
         }
