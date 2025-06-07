@@ -2,7 +2,7 @@ use std::{borrow::Cow, cell::RefCell, collections::VecDeque};
 
 use derive_more::{Deref, DerefMut, Display};
 use itertools::Itertools;
-use rustc_hash::FxHashMap as HashMap;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use thiserror::Error;
 
 use super::Backend;
@@ -12,8 +12,7 @@ use crate::loom::{
 };
 
 #[derive(Debug, Default, Display, Clone, Copy, PartialEq, Eq, Hash, Deref, DerefMut)]
-#[display("{_0}")]
-pub struct StackId(pub usize);
+pub struct StashId(uid::Id<StashId>);
 
 #[derive(Debug, Error)]
 pub enum AllocError {
@@ -25,7 +24,7 @@ pub enum AllocError {
 
 #[derive(Debug, Default, Clone)]
 pub struct Allocator {
-    stack: HashMap<TensorId, StackId>,
+    stash: HashMap<TensorId, StashId>,
     alloc: HashMap<TensorId, TensorId>,
     free: HashMap<usize, VecDeque<TensorId>>,
 }
@@ -44,15 +43,15 @@ impl Allocator {
         root
     }
 
-    /// Retrieve a tensor's allocated stack location.
-    /// Allocates a new stack location if needed.
-    pub fn retrieve(&mut self, id: TensorId) -> StackId {
+    /// Retrieve a tensor's allocated stash location.
+    /// Allocates a new stash location if needed.
+    pub fn retrieve(&mut self, id: TensorId) -> StashId {
         let root = self.redirect(id);
-        match self.stack.get(&root) {
+        match self.stash.get(&root) {
             Some(&id) => id,
             None => {
-                let id = StackId(self.stack.len());
-                self.stack.insert(root, id);
+                let id = StashId(uid::Id::new());
+                self.stash.insert(root, id);
                 id
             }
         }
@@ -84,6 +83,7 @@ impl Allocator {
         Ok(())
     }
 
+    /// Allocates actual locations for tensors in the op and returns a wrapped [`AllocOp`].
     pub fn alloc(&mut self, op: Box<dyn TensorOp>) -> Result<AllocOp, AllocError> {
         let io = op.io();
         self.check(&io)?;
@@ -155,6 +155,18 @@ impl Allocator {
         self.check(&io)?;
 
         Ok(AllocOp { op, io })
+    }
+
+    pub fn retain(&mut self, retain: &[TensorId]) {
+        let ids = retain.iter().map(|&id| self.redirect(id));
+        let retain: HashSet<_> = retain.iter().copied().chain(ids).collect();
+
+        self.stash.retain(|id, _| retain.contains(id));
+        self.alloc
+            .retain(|k, v| retain.contains(k) || retain.contains(v));
+        self.free
+            .values_mut()
+            .for_each(|ids| ids.retain(|id| retain.contains(id)));
     }
 }
 

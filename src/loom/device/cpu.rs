@@ -9,7 +9,7 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use super::{
     BackData, Backend as _, Device, DeviceError, DeviceEvent, DeviceId, OpVTable,
-    allocator::{AllocOp, Allocator, StackId},
+    allocator::{AllocOp, Allocator, StashId},
 };
 use crate::loom::{
     ops::{BackendOp, TensorIr, TensorOp},
@@ -55,7 +55,7 @@ pub struct Backend {
     /// Allocator that tracks buffer renaming.
     allocator: RefCell<Allocator>,
     /// Stack of CPU buffers.
-    buffers: HashMap<StackId, Buffer>,
+    buffers: HashMap<StashId, Buffer>,
 }
 
 impl super::Backend for Backend {
@@ -219,6 +219,15 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                     .flat_map(|tape| tape.ops.iter().map(AsRef::as_ref).flat_map(f))
                     .collect();
                 backend.buffers.retain(|id, _| ids.contains(id));
+
+                // removes all tensors tracked in the allocator unless related to retained ones
+                let f = |ir: TensorIr| ir.id;
+                let f = |op: &dyn TensorOp| op.io().into_iter().map(f);
+                let ids: Vec<_> = retain
+                    .iter()
+                    .flat_map(|tape| tape.ops.iter().map(AsRef::as_ref).flat_map(f))
+                    .collect();
+                backend.allocator().retain(&ids);
 
                 // remove all committed ops unless retained
                 let ids: HashSet<_> = retain

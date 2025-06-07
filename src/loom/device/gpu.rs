@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use super::{
     BackData, Backend as _, Device, DeviceError, DeviceEvent, DeviceId, OpVTable,
-    allocator::{AllocOp, Allocator, StackId},
+    allocator::{AllocOp, Allocator, StashId},
 };
 use crate::loom::{
     ops::{BackendOp, TensorIr, TensorOp},
@@ -28,7 +28,7 @@ pub struct Backend {
     /// Allocator that tracks buffer renaming.
     allocator: RefCell<Allocator>,
     /// Stack of GPU buffers.
-    buffers: HashMap<StackId, wgpu::Buffer>,
+    buffers: HashMap<StashId, wgpu::Buffer>,
     /// Kernel launches and uploads issued by executing a tape of ops.
     launches: Vec<Launch>,
 }
@@ -291,7 +291,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                 platform::spawn(async move { _ = sender.send_async(future.await).await });
             }
             DeviceEvent::Cleanup { retain } => {
-                // remove all buffers in the stack unless retained
+                // remove all buffers in the stash unless retained
                 let f = |ir: TensorIr| backend.allocator().retrieve(ir.id);
                 let f = |op: &dyn TensorOp| op.io().into_iter().map(f);
                 let ids: HashSet<_> = retain
@@ -300,12 +300,21 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                     .collect();
                 backend.buffers.retain(|id, _| ids.contains(id));
 
+                // removes all tensors tracked in the allocator unless related to retained ones
+                let f = |ir: TensorIr| ir.id;
+                let f = |op: &dyn TensorOp| op.io().into_iter().map(f);
+                let ids: Vec<_> = retain
+                    .iter()
+                    .flat_map(|tape| tape.ops.iter().map(AsRef::as_ref).flat_map(f))
+                    .collect();
+                backend.allocator().retain(&ids);
+
                 // remove all committed ops unless retained
-                let retain: HashSet<_> = retain
+                let ids: HashSet<_> = retain
                     .into_iter()
                     .flat_map(|tape| tape.ops.into_iter().map(|op| op.id()))
                     .collect();
-                commit.retain(|id| retain.contains(id));
+                commit.retain(|id| ids.contains(id));
             }
         }
     }
