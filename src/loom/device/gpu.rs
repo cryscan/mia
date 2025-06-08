@@ -88,9 +88,12 @@ impl super::Backend for Backend {
     }
 
     #[inline]
-    fn fetch(&self, id: TensorId) -> Option<Self::Data> {
+    fn fetch(&self, id: TensorId) -> Self::Data {
         let id = self.allocator().retrieve(id);
-        self.buffers.get(&id).cloned()
+        self.buffers
+            .get(&id)
+            .expect("failed to fetch buffer")
+            .clone()
     }
 }
 
@@ -222,7 +225,7 @@ pub struct Upload {
     pub data: Arc<[u8]>,
 }
 
-fn encode(device: wgpu::Device, kernels: Vec<Kernel>) -> wgpu::CommandBuffer {
+fn encode(device: &wgpu::Device, kernels: &[Kernel]) -> wgpu::CommandBuffer {
     let mut encoder = device.create_command_encoder(&Default::default());
     for kernel in kernels {
         let mut pass = encoder.begin_compute_pass(&Default::default());
@@ -263,35 +266,30 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                 .await;
                 match id {
                     Ok(id) => {
-                        let mut xs = uploads.remove(&id).unwrap_or(Vec::new());
-                        xs.append(&mut backend.uploads);
-                        uploads.insert(id, xs);
+                        let mut v = uploads.remove(&id).unwrap_or(Vec::new());
+                        v.append(&mut backend.uploads);
+                        uploads.insert(id, v);
 
+                        let mut v = commands.remove(&id).unwrap_or(Vec::new());
                         let command = Arc::new(Mutex::new(None));
-                        let mut xs = commands.remove(&id).unwrap_or(Vec::new());
-                        xs.push(command.clone());
-                        commands.insert(id, xs);
+                        v.push(command.clone());
+                        commands.insert(id, v);
 
-                        let kernels = std::mem::take(&mut backend.kernels);
                         let device = backend.device.clone();
-                        let encode = move || {
+                        let kernels = std::mem::take(&mut backend.kernels);
+                        platform::spawn_blocking(move || {
                             command
                                 .lock()
                                 .expect("failed to lock command")
-                                .replace(encode(device, kernels));
+                                .replace(encode(&device, &kernels));
                             _ = sender.send(Ok(id))
-                        };
-
-                        #[cfg(not(target_arch = "wasm32"))]
-                        tokio::task::spawn_blocking(encode);
-                        #[cfg(target_arch = "wasm32")]
-                        encode();
+                        });
                     }
                     Err(err) => _ = sender.send_async(Err(err)).await,
                 }
             }
             DeviceEvent::Back { tape, sender } => {
-                let data = async {
+                let id = async {
                     let ops: Vec<_> = tape
                         .ops
                         .into_iter()
@@ -304,33 +302,57 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         backend.execute(&op, io).await;
                         commit.insert(id);
                     }
-                    let id = tape.id;
-                    backend.fetch(id).ok_or(DeviceError::Tensor(id))
+                    Ok(tape.id)
                 }
                 .await;
+                match id {
+                    Ok(id) => {
+                        let mut v = uploads.remove(&id).unwrap_or(Vec::new());
+                        v.append(&mut backend.uploads);
+                        let uploads: Vec<_> = v
+                            .into_iter()
+                            .map(|upload| (backend.fetch(upload.id), upload.data))
+                            .collect();
 
-                let device = backend.device.clone();
-                let queue = backend.queue.clone();
-                let future = async move {
-                    let data = data?;
-                    let (sender, receiver) = flume::bounded(0);
-                    wgpu::util::DownloadBuffer::read_buffer(
-                        &device,
-                        &queue,
-                        &data.slice(..),
-                        move |data| {
-                            let data = data
-                                .map(|data| data.to_vec().into_boxed_slice())
-                                .map(BackData)
-                                .map_err(DeviceError::from);
-                            _ = sender.send(data)
-                        },
-                    );
-                    #[cfg(not(target_arch = "wasm32"))]
-                    tokio::task::spawn_blocking(move || device.poll(wgpu::PollType::Wait));
-                    receiver.recv_async().await?
-                };
-                platform::spawn(async move { _ = sender.send_async(future.await).await });
+                        let commands = commands.remove(&id).unwrap_or(Vec::new());
+                        let data = backend.fetch(id);
+                        let device = backend.device.clone();
+                        let queue = backend.queue.clone();
+                        let kernels = std::mem::take(&mut backend.kernels);
+                        platform::spawn_blocking(move || {
+                            // 1. upload data into input buffers
+                            uploads
+                                .into_iter()
+                                .for_each(|(buffer, data)| queue.write_buffer(&buffer, 0, &data));
+
+                            // 2. encode remaining commands and submit
+                            let mut commands: Vec<_> = commands
+                                .into_iter()
+                                .flat_map(|x| x.lock().expect("failed to lock command").take())
+                                .collect();
+                            commands.push(encode(&device, &kernels));
+                            queue.submit(commands);
+
+                            // 3. read back
+                            wgpu::util::DownloadBuffer::read_buffer(
+                                &device,
+                                &queue,
+                                &data.slice(..),
+                                move |data| {
+                                    let data = data
+                                        .map(|data| data.to_vec().into_boxed_slice())
+                                        .map(BackData)
+                                        .map_err(DeviceError::from);
+                                    _ = sender.send(data)
+                                },
+                            );
+
+                            // 4. poll and wait
+                            _ = device.poll(wgpu::PollType::Wait)
+                        });
+                    }
+                    Err(err) => _ = sender.send_async(Err(err)).await,
+                }
             }
             DeviceEvent::Cleanup { retain } => {
                 // remove all buffers in the stash unless retained

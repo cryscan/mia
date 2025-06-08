@@ -33,8 +33,6 @@ pub enum DeviceError {
     Recv(#[from] flume::RecvError),
     #[error("failed to allocate tensor")]
     Alloc(#[from] allocator::AllocError),
-    #[error("tensor not found: {0}")]
-    Tensor(TensorId),
 }
 
 #[derive(Debug, Clone, Deref, DerefMut)]
@@ -65,8 +63,8 @@ pub trait Backend {
     fn create(&mut self, id: TensorId, contents: &[u8]) -> Self::Data;
     /// Allocate a buffer for tensor of `id`.
     fn alloc(&mut self, id: TensorId, size: usize) -> Self::Data;
-    /// Get the buffer of tensor of `id`. Returns [`None`] if not found.
-    fn fetch(&self, id: TensorId) -> Option<Self::Data>;
+    /// Get the buffer of tensor of `id`.
+    fn fetch(&self, id: TensorId) -> Self::Data;
 }
 
 type OpFn<B> = for<'a> fn(&'a mut B, &'a dyn TensorOp, Vec<TensorIr>) -> BoxFuture<'a, ()>;

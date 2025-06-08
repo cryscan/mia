@@ -8,7 +8,7 @@ use std::{
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use super::{
-    BackData, Backend as _, Device, DeviceError, DeviceEvent, DeviceId, OpVTable,
+    BackData, Backend as _, Device, DeviceEvent, DeviceId, OpVTable,
     allocator::{AllocOp, Allocator, StashId},
 };
 use crate::loom::{
@@ -95,9 +95,12 @@ impl super::Backend for Backend {
     }
 
     #[inline]
-    fn fetch(&self, id: TensorId) -> Option<Self::Data> {
+    fn fetch(&self, id: TensorId) -> Self::Data {
         let id = self.allocator().retrieve(id);
-        self.buffers.get(&id).cloned()
+        self.buffers
+            .get(&id)
+            .expect("failed to fetch buffer")
+            .clone()
     }
 }
 
@@ -203,7 +206,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         commit.insert(id);
                     }
                     let id = tape.id;
-                    backend.fetch(id).ok_or(DeviceError::Tensor(id))
+                    Ok(backend.fetch(id))
                 }
                 .await
                 .map(Buffer::into_inner)
