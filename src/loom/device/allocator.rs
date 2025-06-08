@@ -157,16 +157,15 @@ impl Allocator {
         Ok(AllocOp { op, io })
     }
 
-    pub fn retain(&mut self, retain: &[TensorId]) {
+    pub fn retain(&mut self, retain: Vec<TensorId>) {
         let ids = retain.iter().map(|&id| self.redirect(id));
-        let retain: HashSet<_> = retain.iter().copied().chain(ids).collect();
+        let ids: HashSet<_> = retain.iter().copied().chain(ids).collect();
 
-        self.stash.retain(|id, _| retain.contains(id));
-        self.alloc
-            .retain(|k, v| retain.contains(k) || retain.contains(v));
+        self.stash.retain(|id, _| ids.contains(id));
+        self.alloc.retain(|k, v| ids.contains(k) || ids.contains(v));
         self.free
             .values_mut()
-            .for_each(|ids| ids.retain(|id| retain.contains(id)));
+            .for_each(|v| v.retain(|id| ids.contains(id)));
     }
 }
 

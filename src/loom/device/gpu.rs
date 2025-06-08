@@ -1,7 +1,7 @@
 use std::{
     any::TypeId,
     cell::{RefCell, RefMut},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
@@ -29,8 +29,10 @@ pub struct Backend {
     allocator: RefCell<Allocator>,
     /// Stack of GPU buffers.
     buffers: HashMap<StashId, wgpu::Buffer>,
-    /// Kernel launches and uploads issued by executing a tape of ops.
-    launches: Vec<Launch>,
+    /// Kernel launches issued by executing a tape of ops.
+    kernels: Vec<Kernel>,
+    /// Data uploads issued by executing a tape of ops.
+    uploads: Vec<Upload>,
 }
 
 impl super::Backend for Backend {
@@ -163,7 +165,8 @@ impl GpuBuilder {
 
         let allocator = RefCell::new(Allocator::default());
         let buffers = HashMap::default();
-        let launches = Vec::new();
+        let kernels = Vec::default();
+        let uploads = Vec::default();
 
         let (sender, receiver) = flume::unbounded();
         let backend = Backend {
@@ -172,7 +175,8 @@ impl GpuBuilder {
             device,
             queue,
             buffers,
-            launches,
+            kernels,
+            uploads,
         };
         platform::spawn(serve(backend, receiver));
 
@@ -206,12 +210,6 @@ impl GpuBuilder {
 }
 
 #[derive(Debug, Clone)]
-pub enum Launch {
-    Kernel(Kernel),
-    Upload(Upload),
-}
-
-#[derive(Debug, Clone)]
 pub struct Kernel {
     pub pipeline: wgpu::ComputePipeline,
     pub bindings: Vec<wgpu::BindGroup>,
@@ -224,8 +222,25 @@ pub struct Upload {
     pub data: Arc<[u8]>,
 }
 
+fn encode(device: wgpu::Device, kernels: Vec<Kernel>) -> wgpu::CommandBuffer {
+    let mut encoder = device.create_command_encoder(&Default::default());
+    for kernel in kernels {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&kernel.pipeline);
+        kernel
+            .bindings
+            .iter()
+            .enumerate()
+            .for_each(|(index, binding)| pass.set_bind_group(index as u32, binding, &[]));
+        pass.dispatch_workgroups(kernel.dispatch[0], kernel.dispatch[1], kernel.dispatch[2]);
+    }
+    encoder.finish()
+}
+
 async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
     let mut commit = HashSet::default();
+    let mut uploads = HashMap::default();
+    let mut commands = HashMap::default();
 
     while let Ok(event) = receiver.recv_async().await {
         match event {
@@ -246,7 +261,34 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                     Ok(tape.id)
                 }
                 .await;
-                _ = sender.send_async(id).await
+                match id {
+                    Ok(id) => {
+                        let mut xs = uploads.remove(&id).unwrap_or(Vec::new());
+                        xs.append(&mut backend.uploads);
+                        uploads.insert(id, xs);
+
+                        let command = Arc::new(Mutex::new(None));
+                        let mut xs = commands.remove(&id).unwrap_or(Vec::new());
+                        xs.push(command.clone());
+                        commands.insert(id, xs);
+
+                        let kernels = std::mem::take(&mut backend.kernels);
+                        let device = backend.device.clone();
+                        let encode = move || {
+                            command
+                                .lock()
+                                .expect("failed to lock command")
+                                .replace(encode(device, kernels));
+                            _ = sender.send(Ok(id))
+                        };
+
+                        #[cfg(not(target_arch = "wasm32"))]
+                        tokio::task::spawn_blocking(encode);
+                        #[cfg(target_arch = "wasm32")]
+                        encode();
+                    }
+                    Err(err) => _ = sender.send_async(Err(err)).await,
+                }
             }
             DeviceEvent::Back { tape, sender } => {
                 let data = async {
@@ -307,7 +349,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                     .iter()
                     .flat_map(|tape| tape.ops.iter().map(AsRef::as_ref).flat_map(f))
                     .collect();
-                backend.allocator().retain(&ids);
+                backend.allocator().retain(ids);
 
                 // remove all committed ops unless retained
                 let ids: HashSet<_> = retain

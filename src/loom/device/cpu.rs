@@ -227,7 +227,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                     .iter()
                     .flat_map(|tape| tape.ops.iter().map(AsRef::as_ref).flat_map(f))
                     .collect();
-                backend.allocator().retain(&ids);
+                backend.allocator().retain(ids);
 
                 // remove all committed ops unless retained
                 let ids: HashSet<_> = retain
