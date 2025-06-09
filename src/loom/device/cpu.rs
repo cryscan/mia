@@ -5,6 +5,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use itertools::Itertools;
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use super::{
@@ -174,11 +175,11 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
         match event {
             DeviceEvent::Execute { tape, sender } => {
                 let id = async {
-                    let ops: Vec<_> = tape
+                    let ops = tape
                         .ops
                         .into_iter()
                         .filter(|op| !commit.contains(&op.id()))
-                        .collect();
+                        .collect_vec();
                     for op in ops {
                         let op = backend.allocator().alloc(op)?;
                         let io = op.io();
@@ -193,11 +194,11 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
             }
             DeviceEvent::Back { tape, sender } => {
                 let data = async {
-                    let ops: Vec<_> = tape
+                    let ops = tape
                         .ops
                         .into_iter()
                         .filter(|op| !commit.contains(&op.id()))
-                        .collect();
+                        .collect_vec();
                     for op in ops {
                         let op = backend.allocator().alloc(op)?;
                         let io = op.io();
@@ -226,10 +227,10 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                 // removes all tensors tracked in the allocator unless related to retained ones
                 let f = |ir: TensorIr| ir.id;
                 let f = |op: &dyn TensorOp| op.io().into_iter().map(f);
-                let ids: Vec<_> = retain
+                let ids = retain
                     .iter()
                     .flat_map(|tape| tape.ops.iter().map(AsRef::as_ref).flat_map(f))
-                    .collect();
+                    .collect_vec();
                 backend.allocator().retain(ids);
 
                 // remove all committed ops unless retained

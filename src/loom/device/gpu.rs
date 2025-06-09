@@ -4,6 +4,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use itertools::Itertools;
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use thiserror::Error;
 
@@ -249,11 +250,11 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
         match event {
             DeviceEvent::Execute { tape, sender } => {
                 let id = async {
-                    let ops: Vec<_> = tape
+                    let ops = tape
                         .ops
                         .into_iter()
                         .filter(|op| !commit.contains(&op.id()))
-                        .collect();
+                        .collect_vec();
                     for op in ops {
                         let op = backend.allocator().alloc(op)?;
                         let io = op.io();
@@ -290,11 +291,11 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
             }
             DeviceEvent::Back { tape, sender } => {
                 let id = async {
-                    let ops: Vec<_> = tape
+                    let ops = tape
                         .ops
                         .into_iter()
                         .filter(|op| !commit.contains(&op.id()))
-                        .collect();
+                        .collect_vec();
                     for op in ops {
                         let op = backend.allocator().alloc(op)?;
                         let io = op.io();
@@ -307,12 +308,12 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                 .await;
                 match id {
                     Ok(id) => {
-                        let mut v = uploads.remove(&id).unwrap_or(Vec::new());
-                        v.append(&mut backend.uploads);
-                        let uploads: Vec<_> = v
+                        let mut uploads = uploads.remove(&id).unwrap_or(Vec::new());
+                        uploads.append(&mut backend.uploads);
+                        let uploads = uploads
                             .into_iter()
                             .map(|upload| (backend.fetch(upload.id), upload.data))
-                            .collect();
+                            .collect_vec();
 
                         let commands = commands.remove(&id).unwrap_or(Vec::new());
                         let data = backend.fetch(id);
@@ -325,30 +326,38 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                                 .into_iter()
                                 .for_each(|(buffer, data)| queue.write_buffer(&buffer, 0, &data));
 
-                            // 2. encode remaining commands and submit
-                            let mut commands: Vec<_> = commands
+                            // 2. encode remaining commands
+                            let mut commands = commands
                                 .into_iter()
                                 .flat_map(|x| x.lock().expect("failed to lock command").take())
-                                .collect();
+                                .collect_vec();
                             commands.push(encode(&device, &kernels));
-                            queue.submit(commands);
 
-                            // 3. read back
-                            wgpu::util::DownloadBuffer::read_buffer(
-                                &device,
-                                &queue,
-                                &data.slice(..),
-                                move |data| {
-                                    let data = data
+                            // 3. submit and read back
+                            let back = device.create_buffer(&wgpu::BufferDescriptor {
+                                label: None,
+                                size: data.size(),
+                                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                                mapped_at_creation: false,
+                            });
+                            let mut encoder = device.create_command_encoder(&Default::default());
+                            encoder.copy_buffer_to_buffer(&data, 0, &back, 0, data.size());
+                            commands.push(encoder.finish());
+
+                            let index = queue.submit(commands);
+
+                            back.clone()
+                                .map_async(wgpu::MapMode::Read, .., move |result| {
+                                    let data = result
+                                        .map(|_| back.get_mapped_range(..))
                                         .map(|data| data.to_vec().into_boxed_slice())
                                         .map(BackData)
                                         .map_err(DeviceError::from);
                                     _ = sender.send(data)
-                                },
-                            );
+                                });
 
                             // 4. poll and wait
-                            _ = device.poll(wgpu::PollType::Wait)
+                            _ = device.poll(wgpu::PollType::WaitForSubmissionIndex(index))
                         });
                     }
                     Err(err) => _ = sender.send_async(Err(err)).await,
@@ -367,10 +376,10 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                 // removes all tensors tracked in the allocator unless related to retained ones
                 let f = |ir: TensorIr| ir.id;
                 let f = |op: &dyn TensorOp| op.io().into_iter().map(f);
-                let ids: Vec<_> = retain
+                let ids = retain
                     .iter()
                     .flat_map(|tape| tape.ops.iter().map(AsRef::as_ref).flat_map(f))
-                    .collect();
+                    .collect_vec();
                 backend.allocator().retain(ids);
 
                 // remove all committed ops unless retained
