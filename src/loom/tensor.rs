@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use derive_more::Display;
+use derive_more::{AsMut, AsRef, Display};
 use thiserror::Error;
 
 #[cfg(feature = "serde")]
@@ -35,11 +35,13 @@ pub enum TensorError {
 pub struct TensorId(pub uuid::Uuid);
 
 /// A statically typed tensor. Good to fit into typed APIs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, AsRef, AsMut)]
 pub struct Tensor<D, T> {
     device: Arc<D>,
     layout: Layout,
     id: TensorId,
+    #[as_ref]
+    #[as_mut]
     tape: Arc<TensorTape>,
     phantom: PhantomData<T>,
 }
@@ -58,6 +60,11 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
     #[inline]
     pub fn id(&self) -> TensorId {
         self.id
+    }
+
+    #[inline]
+    pub fn tape(&self) -> &TensorTape {
+        &self.tape
     }
 
     #[inline]
@@ -114,7 +121,8 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
     pub fn zeros(device: Arc<D>, layout: impl IntoLayout) -> Self {
         let layout = layout.into_layout();
         let id = TensorId(uuid::Uuid::new_v4());
-        let tape = TensorTape::default().into();
+        let ops = Vec::new();
+        let tape = Arc::new(TensorTape { id, ops });
         let phantom = PhantomData;
         Self {
             device,
@@ -131,7 +139,8 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
         let device = self.device.clone();
         let layout = self.layout();
         let id = TensorId(uuid::Uuid::new_v4());
-        let tape = TensorTape::default().into();
+        let ops = Vec::new();
+        let tape = Arc::new(TensorTape { id, ops });
         let phantom = PhantomData;
         Self {
             device,

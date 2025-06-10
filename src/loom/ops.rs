@@ -100,6 +100,20 @@ impl std::ops::DerefMut for dyn TensorOp {
     }
 }
 
+impl PartialEq for dyn TensorOp {
+    fn eq(&self, other: &Self) -> bool {
+        self.id() == other.id()
+    }
+}
+
+impl Eq for dyn TensorOp {}
+
+impl std::hash::Hash for dyn TensorOp {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id().hash(state);
+    }
+}
+
 impl std::fmt::Debug for dyn TensorOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TensorOp")
@@ -117,7 +131,7 @@ pub trait BackendOp<B: Backend> {
 }
 
 /// Records operators a tensor has experienced.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct TensorTape {
     /// The ID of the tensor itself.
     pub id: TensorId,
