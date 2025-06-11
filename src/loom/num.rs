@@ -44,10 +44,10 @@ impl DataType {
             DataType::U8 => size_of::<u8>(),
             DataType::U16 => size_of::<u16>(),
             DataType::U32 => size_of::<u32>(),
-            DataType::U4x8 => size_of::<u32>(),
-            DataType::U8x4 => size_of::<u32>(),
-            DataType::F32x4 => size_of::<[f32; 4]>(),
-            DataType::F16x4 => size_of::<[f16; 4]>(),
+            DataType::U4x8 => size_of::<U4x8>(),
+            DataType::U8x4 => size_of::<U8x4>(),
+            DataType::F32x4 => size_of::<F32x4>(),
+            DataType::F16x4 => size_of::<F16x4>(),
         }
     }
 }
