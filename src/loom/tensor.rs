@@ -10,7 +10,7 @@ use super::{
     device::Device,
     layout::{IntoLayout, Layout},
     num::{DataType, Scalar},
-    ops::TensorTape,
+    ops::{Access, InnerOp, TensorIr, TensorOp, TensorTape},
     slice::Slice,
 };
 
@@ -26,6 +26,8 @@ pub enum TensorError {
     Cast(usize, usize),
     #[error("tensor slice error: slice {1} is not compatible with layout {0}")]
     Slice(Layout, Slice),
+    #[error("tensor layout error: expected {0}, got {1}")]
+    Layout(Layout, Layout),
 }
 
 #[derive(Debug, Default, Display, Clone, Copy, PartialEq, Eq, Hash)]
@@ -121,7 +123,8 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
     pub fn zeros(device: Arc<D>, layout: impl IntoLayout) -> Self {
         let layout = layout.into_layout();
         let id = TensorId(uuid::Uuid::new_v4());
-        let ops = Vec::new();
+        let ir = unsafe { TensorIr::unique::<T>(id, layout.clone(), Access::WriteOnly) };
+        let ops: Vec<Box<dyn TensorOp>> = vec![Box::new(InnerOp::new([], [ir]))];
         let tape = Arc::new(TensorTape { id, ops });
         let phantom = PhantomData;
         Self {
@@ -139,7 +142,8 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
         let device = self.device.clone();
         let layout = self.layout();
         let id = TensorId(uuid::Uuid::new_v4());
-        let ops = Vec::new();
+        let ir = unsafe { TensorIr::unique::<T>(id, layout.clone(), Access::WriteOnly) };
+        let ops: Vec<Box<dyn TensorOp>> = vec![Box::new(InnerOp::new([], [ir]))];
         let tape = Arc::new(TensorTape { id, ops });
         let phantom = PhantomData;
         Self {

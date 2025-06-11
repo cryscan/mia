@@ -1,29 +1,24 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, sync::Arc};
 
 use mia_derive::TensorOp;
 
 use crate::loom::{
+    device::Backend,
     num::Scalar,
-    ops::{TensorIr, TensorOp, TensorOpId},
+    ops::{BackendOp, InnerOp, TensorIr},
 };
 
-#[derive(Debug, Clone)]
-pub struct BinaryOp {
-    pub id: TensorOpId,
-    pub inputs: [TensorIr; 2],
-    pub output: TensorIr,
+#[derive(Debug, Clone, TensorOp)]
+#[tensor_op(crate = "crate")]
+pub struct CreateOp {
+    #[tensor_op]
+    pub op: InnerOp<0, 1>,
+    pub contents: Arc<[u8]>,
 }
 
-impl TensorOp for BinaryOp {
-    fn id(&self) -> TensorOpId {
-        self.id
-    }
-
-    fn io(&self) -> Vec<TensorIr> {
-        [&self.inputs[0], &self.inputs[1], &self.output]
-            .into_iter()
-            .cloned()
-            .collect()
+impl<B: Backend> BackendOp<B> for CreateOp {
+    async fn execute(&self, backend: &mut B, io: Vec<TensorIr>) {
+        backend.create(io[0].id, &self.contents);
     }
 }
 
@@ -31,12 +26,12 @@ impl TensorOp for BinaryOp {
 #[tensor_op(crate = "crate", bound = "T: Scalar")]
 pub struct AddOp<T> {
     #[tensor_op]
-    pub op: BinaryOp,
+    pub op: InnerOp<2, 1>,
     pub phantom: PhantomData<T>,
 }
 
-impl<T: Scalar> From<BinaryOp> for AddOp<T> {
-    fn from(value: BinaryOp) -> Self {
+impl<T: Scalar> From<InnerOp<2, 1>> for AddOp<T> {
+    fn from(value: InnerOp<2, 1>) -> Self {
         Self {
             op: value,
             phantom: PhantomData,

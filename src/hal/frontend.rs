@@ -2,24 +2,21 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 
-use crate::{
-    hal::ops::{AddOp, BinaryOp},
-    loom::{
-        device::Device,
-        num::Scalar,
-        ops::{Access, TensorOp},
-        tensor::Tensor,
-    },
+use super::ops::{AddOp, CreateOp};
+use crate::loom::{
+    device::Device,
+    layout::IntoLayout,
+    num::Scalar,
+    ops::{Access, InnerOp, TensorOp},
+    tensor::{Tensor, TensorError},
 };
 
-fn element_binary_op<D, T, Op>(lhs: Tensor<D, T>, rhs: Tensor<D, T>) -> Tensor<D, T>
+fn binary_op_unchecked<D, T, Op>(lhs: Tensor<D, T>, rhs: Tensor<D, T>) -> Tensor<D, T>
 where
     D: Device,
     T: Scalar,
-    Op: From<BinaryOp> + TensorOp,
+    Op: From<InnerOp<2, 1>> + TensorOp,
 {
-    assert_eq!(lhs.layout(), rhs.layout());
-
     let mut output = Tensor::zeros_like(&lhs);
     let mut ops = [lhs.as_ref().ops.clone(), rhs.as_ref().ops.clone()]
         .concat()
@@ -27,28 +24,59 @@ where
         .unique()
         .collect_vec();
 
-    let op = Op::from(BinaryOp {
-        id: Default::default(),
-        inputs: [lhs.ir(Access::ReadOnly), rhs.ir(Access::ReadOnly)],
-        output: output.ir(Access::WriteOnly),
-    });
+    let inputs = [lhs.ir(Access::ReadOnly), rhs.ir(Access::ReadOnly)];
+    let outputs = [output.ir(Access::WriteOnly)];
+    let op = Op::from(InnerOp::new(inputs, outputs));
     ops.push(Box::new(op));
 
-    let tape = output.as_mut();
-    let tape = Arc::get_mut(tape).expect("must be unique");
-    tape.ops = ops;
+    _ = output.replace_ops(ops);
 
     output
 }
 
-impl<D, T> std::ops::Add<Tensor<D, T>> for Tensor<D, T>
-where
-    D: Device,
-    T: Scalar,
-{
+impl<D: Device, T: Scalar> std::ops::Add<Tensor<D, T>> for Tensor<D, T> {
     type Output = Tensor<D, T>;
 
     fn add(self, rhs: Tensor<D, T>) -> Self::Output {
-        element_binary_op::<_, _, AddOp<T>>(self, rhs)
+        assert_eq!(self.layout(), rhs.layout());
+        binary_op_unchecked::<_, _, AddOp<T>>(self, rhs)
+    }
+}
+
+impl<D: Device, T: Scalar> Tensor<D, T> {
+    /// Replace the inner ops recorded on the tape of the tensor. Panics if the tensor isn't unique.
+    pub fn replace_ops(&mut self, ops: Vec<Box<dyn TensorOp>>) -> Vec<Box<dyn TensorOp>> {
+        let tape = self.as_mut();
+        let tape = Arc::get_mut(tape).expect("must be unique");
+        std::mem::replace(&mut tape.ops, ops)
+    }
+
+    pub fn create(
+        device: Arc<D>,
+        layout: impl IntoLayout,
+        contents: &[T],
+    ) -> Result<Self, TensorError> {
+        let layout = layout.into_layout();
+        if layout.size() != contents.len() {
+            return Err(TensorError::Create(layout, contents.len()));
+        }
+
+        let mut output = Tensor::<D, T>::zeros(device, layout);
+        let contents = bytemuck::cast_slice(contents).to_vec().into();
+        let op = InnerOp::new([], [output.ir(Access::WriteOnly)]);
+        let op = CreateOp { op, contents };
+        let ops: Vec<Box<dyn TensorOp>> = vec![Box::new(op)];
+
+        _ = output.replace_ops(ops);
+
+        Ok(output)
+    }
+
+    #[inline]
+    pub fn add_checked(self, rhs: Tensor<D, T>) -> Result<Self, TensorError> {
+        if self.layout() != rhs.layout() {
+            return Err(TensorError::Layout(self.layout(), rhs.layout()));
+        }
+        Ok(binary_op_unchecked::<_, _, AddOp<T>>(self, rhs))
     }
 }

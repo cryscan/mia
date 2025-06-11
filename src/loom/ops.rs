@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     device::{Backend, Device},
-    layout::Layout,
+    layout::{IntoLayout, Layout},
     num::{DataType, Scalar},
     slice::Slice,
     tensor::{Tensor, TensorId},
@@ -34,6 +34,27 @@ pub struct TensorIr {
 }
 
 impl TensorIr {
+    /// Creates a unique IR of the tensor.
+    ///
+    /// # Safety
+    /// This function is safe to call iff:
+    /// 1. The given `id` and `layout` originate from the same tensor;
+    /// 2. The tensor has exactly one active reference.
+    pub unsafe fn unique<T: Scalar>(id: TensorId, layout: impl IntoLayout, access: Access) -> Self {
+        let layout = layout.into_layout();
+        let slice = Slice::from_layout(layout.clone());
+        let r#type = T::DATA_TYPE;
+        let count = 1;
+        Self {
+            layout,
+            slice,
+            r#type,
+            id,
+            count,
+            access,
+        }
+    }
+
     #[inline]
     pub fn data_count(&self) -> usize {
         self.layout.size() * self.r#type.count()
@@ -146,3 +167,42 @@ impl PartialEq for TensorTape {
 }
 
 impl Eq for TensorTape {}
+
+#[derive(Debug, Clone)]
+pub struct InnerOp<const I: usize, const O: usize> {
+    pub id: TensorOpId,
+    pub inputs: [TensorIr; I],
+    pub outputs: [TensorIr; O],
+}
+
+impl<const I: usize, const O: usize> InnerOp<I, O> {
+    #[inline]
+    pub fn new(inputs: [TensorIr; I], outputs: [TensorIr; O]) -> Self {
+        inputs
+            .iter()
+            .for_each(|ir| assert_eq!(ir.access, Access::ReadOnly));
+        outputs
+            .iter()
+            .for_each(|ir| assert_eq!(ir.access, Access::WriteOnly));
+        let id = Default::default();
+        Self {
+            id,
+            inputs,
+            outputs,
+        }
+    }
+}
+
+impl<const I: usize, const O: usize> TensorOp for InnerOp<I, O> {
+    fn id(&self) -> TensorOpId {
+        self.id
+    }
+
+    fn io(&self) -> Vec<TensorIr> {
+        self.inputs
+            .iter()
+            .chain(self.outputs.iter())
+            .cloned()
+            .collect()
+    }
+}
