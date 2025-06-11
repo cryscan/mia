@@ -206,3 +206,9 @@ impl<const I: usize, const O: usize> TensorOp for InnerOp<I, O> {
             .collect()
     }
 }
+
+impl<B: Backend, const I: usize, const O: usize> BackendOp<B> for InnerOp<I, O> {
+    async fn execute(&self, _backend: &mut B, _io: Vec<TensorIr>) {
+        // noop
+    }
+}
