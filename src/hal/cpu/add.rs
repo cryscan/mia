@@ -1,21 +1,62 @@
 use half::f16;
+use itertools::Itertools;
 
 use crate::{
     hal::ops::AddOp,
     loom::{
-        device::cpu::Backend,
+        device::{Backend as _, cpu::Backend},
         ops::{BackendOp, TensorIr},
     },
 };
 
 impl BackendOp<Backend> for AddOp<f32> {
-    async fn execute(&self, _backend: &mut Backend, _io: Vec<TensorIr>) {
-        todo!()
+    async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        let output = {
+            let x = backend.fetch(io[0].id);
+            let y = backend.fetch(io[1].id);
+
+            let x = x.read();
+            let y = y.read();
+
+            let x: &[f32] = bytemuck::cast_slice(&x);
+            let y: &[f32] = bytemuck::cast_slice(&y);
+
+            x.iter()
+                .zip_eq(y.iter())
+                .map(|(x, y)| x + y)
+                .flat_map(|z| z.to_ne_bytes())
+                .collect_vec()
+                .into_boxed_slice()
+        };
+
+        let z = backend.fetch(io[2].id);
+        let mut z = z.write();
+        *z = output;
     }
 }
 
 impl BackendOp<Backend> for AddOp<f16> {
-    async fn execute(&self, _backend: &mut Backend, _io: Vec<TensorIr>) {
-        todo!()
+    async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        let output = {
+            let x = backend.fetch(io[0].id);
+            let y = backend.fetch(io[1].id);
+
+            let x = x.read();
+            let y = y.read();
+
+            let x: &[f16] = bytemuck::cast_slice(&x);
+            let y: &[f16] = bytemuck::cast_slice(&y);
+
+            x.iter()
+                .zip_eq(y.iter())
+                .map(|(x, y)| x + y)
+                .flat_map(|z| z.to_ne_bytes())
+                .collect_vec()
+                .into_boxed_slice()
+        };
+
+        let z = backend.fetch(io[2].id);
+        let mut z = z.write();
+        *z = output;
     }
 }
