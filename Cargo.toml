@@ -57,14 +57,14 @@ tracing-tracy = { version = "0.11.4", optional = true }
 trait-variant = "0.1.2"
 u4 = "0.1.2"
 uid = "0.1"
-uuid = { version = "1.17.0", features = ["bytemuck", "v4", "js"] }
+uuid = { version = "1.17.0", features = ["bytemuck", "js", "v4"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 wgpu = "25.0"
 
 [dependencies.mia-derive]
-version = "0.0"
-# path = "crates/mia_derive"
+# version = "0.0"
+path = "crates/mia_derive"
 
 [dependencies.tokio]
 default-features = false
