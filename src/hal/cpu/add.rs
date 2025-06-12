@@ -33,20 +33,14 @@ impl BackendOp<Backend> for AddOp<f32> {
             let x = backend.fetch(io[0].id);
             let y = backend.fetch(io[1].id);
 
-            let (sender, receiver) = flume::bounded(0);
-            crate::loom::platform::spawn_blocking(move || {
-                let x = x.read_slice::<f32>();
-                let y = y.read_slice::<f32>();
+            let x = x.read_slice::<f16>();
+            let y = y.read_slice::<f16>();
 
-                let output = x
-                    .par_iter()
-                    .zip_eq(y.par_iter())
-                    .map(|(x, y)| x + y)
-                    .flat_map(|z| z.to_ne_bytes())
-                    .collect();
-                _ = sender.send(output);
-            });
-            receiver.recv_async().await.expect("failed to receive")
+            x.par_iter()
+                .zip_eq(y.par_iter())
+                .map(|(x, y)| x + y)
+                .flat_map(|z| z.to_ne_bytes())
+                .collect()
         };
         *backend.fetch(io[2].id).write() = output;
     }
@@ -77,20 +71,14 @@ impl BackendOp<Backend> for AddOp<f16> {
             let x = backend.fetch(io[0].id);
             let y = backend.fetch(io[1].id);
 
-            let (sender, receiver) = flume::bounded(0);
-            crate::loom::platform::spawn_blocking(move || {
-                let x = x.read_slice::<f16>();
-                let y = y.read_slice::<f16>();
+            let x = x.read_slice::<f16>();
+            let y = y.read_slice::<f16>();
 
-                let output = x
-                    .par_iter()
-                    .zip_eq(y.par_iter())
-                    .map(|(x, y)| x + y)
-                    .flat_map(|z| z.to_ne_bytes())
-                    .collect();
-                _ = sender.send(output);
-            });
-            receiver.recv_async().await.expect("failed to receive")
+            x.par_iter()
+                .zip_eq(y.par_iter())
+                .map(|(x, y)| x + y)
+                .flat_map(|z| z.to_ne_bytes())
+                .collect()
         };
         *backend.fetch(io[2].id).write() = output;
     }
