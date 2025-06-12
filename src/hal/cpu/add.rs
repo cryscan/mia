@@ -102,27 +102,26 @@ mod tests {
 
     use half::f16;
     use itertools::Itertools;
+    use rayon::prelude::*;
 
     use crate::loom::{device::CpuBuilder, tensor::Tensor};
 
     #[tokio::test]
     async fn test_add() -> Result<(), Box<dyn Error>> {
         let cpu = CpuBuilder::new().add_default_ops().build().await;
+        const C: usize = 1024;
+        const T: usize = 768;
 
-        let data = (0..12).map(|x| f16::from_f32(x as f32)).collect_vec();
+        let data = (0..C * T).map(|x| f16::from_f32(x as f32)).collect_vec();
 
-        let a = Tensor::create(cpu.clone(), [4, 3], data.clone())?;
-        let b = Tensor::create(cpu.clone(), [4, 3], data.clone())?;
+        let a = Tensor::create(cpu.clone(), [C, T], data.clone())?;
+        let b = Tensor::create(cpu.clone(), [C, T], data.clone())?;
         let b = a.clone() + b;
 
-        let c = Tensor::create(cpu.clone(), [4, 3], data.clone())?;
+        let c = Tensor::create(cpu.clone(), [C, T], data.clone())?;
         let d = a + b.clone() + c;
 
-        let r#ref = data
-            .iter()
-            .map(|x| x + x + x + x)
-            .collect_vec()
-            .into_boxed_slice();
+        let r#ref = data.par_iter().map(|x| x + x + x + x).collect::<Box<_>>();
 
         let output = d.back().await?;
         assert_eq!(output, r#ref);
