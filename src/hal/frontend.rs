@@ -7,7 +7,7 @@ use crate::loom::{
     device::{Device, DeviceError, DeviceEvent},
     layout::IntoLayout,
     num::Scalar,
-    ops::{Access, InnerOp, TensorOp},
+    ops::{Access, InnerOp, OneOp, TensorOp},
     tensor::{Tensor, TensorError},
 };
 
@@ -80,6 +80,15 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
         let (sender, receiver) = flume::bounded(0);
         let tape = self.tape().clone();
         let event = DeviceEvent::Back { tape, sender };
+        self.device().execute(event);
+
+        // reclaim self using a terminal op
+        let mut tape = self.tape().clone();
+        let op = OneOp::new(self.ir(Access::ReadOnly));
+        tape.ops.push(Box::new(op));
+
+        let (sender, _) = flume::bounded(0);
+        let event = DeviceEvent::Execute { tape, sender };
         self.device().execute(event);
 
         let data = receiver.recv_async().await??;

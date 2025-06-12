@@ -208,6 +208,8 @@ impl<const I: usize, const O: usize> TensorOp for InnerOp<I, O> {
     }
 }
 
+/// The initial op, which is inserted as the first op in a tensor's tape.
+/// the allocator can then ensure that the tensor's buffer gets allocated on initialization.
 #[derive(Debug, Clone, TensorOp)]
 #[tensor_op(crate = "crate")]
 pub struct ZeroOp(pub InnerOp<0, 1>);
@@ -223,6 +225,8 @@ impl<B: Backend> BackendOp<B> for ZeroOp {
     async fn execute(&self, _: &mut B, _: Vec<TensorIr>) {}
 }
 
+/// The terminal op, which is inserted after the tensor is consumed.
+/// The allocator can then have the chance to reclaim it.
 #[derive(Debug, Clone, TensorOp)]
 #[tensor_op(crate = "crate")]
 pub struct OneOp(pub InnerOp<1, 0>);
