@@ -15,23 +15,16 @@ impl BackendOp<Backend> for AddOp<f32> {
             let x = backend.fetch(io[0].id);
             let y = backend.fetch(io[1].id);
 
-            let x = x.read();
-            let y = y.read();
-
-            let x: &[f32] = bytemuck::cast_slice(&x);
-            let y: &[f32] = bytemuck::cast_slice(&y);
+            let x = x.read_slice::<f32>();
+            let y = y.read_slice::<f32>();
 
             x.iter()
                 .zip_eq(y.iter())
                 .map(|(x, y)| x + y)
                 .flat_map(|z| z.to_ne_bytes())
-                .collect_vec()
-                .into_boxed_slice()
+                .collect()
         };
-
-        let z = backend.fetch(io[2].id);
-        let mut z = z.write();
-        *z = output;
+        *backend.fetch(io[2].id).write() = output;
     }
 }
 
@@ -41,22 +34,15 @@ impl BackendOp<Backend> for AddOp<f16> {
             let x = backend.fetch(io[0].id);
             let y = backend.fetch(io[1].id);
 
-            let x = x.read();
-            let y = y.read();
-
-            let x: &[f16] = bytemuck::cast_slice(&x);
-            let y: &[f16] = bytemuck::cast_slice(&y);
+            let x = x.read_slice::<f16>();
+            let y = y.read_slice::<f16>();
 
             x.iter()
                 .zip_eq(y.iter())
                 .map(|(x, y)| x + y)
                 .flat_map(|z| z.to_ne_bytes())
-                .collect_vec()
-                .into_boxed_slice()
+                .collect()
         };
-
-        let z = backend.fetch(io[2].id);
-        let mut z = z.write();
-        *z = output;
+        *backend.fetch(io[2].id).write() = output;
     }
 }

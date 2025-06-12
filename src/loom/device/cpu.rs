@@ -1,6 +1,7 @@
 use std::{
     any::TypeId,
     cell::{RefCell, RefMut},
+    marker::PhantomData,
     ops::{Deref, DerefMut},
     sync::{Arc, RwLock},
 };
@@ -13,6 +14,7 @@ use super::{
     allocator::{AllocOp, Allocator, StashId},
 };
 use crate::loom::{
+    num::Scalar,
     ops::{BackendOp, TensorIr, TensorOp},
     platform,
     tensor::TensorId,
@@ -21,9 +23,15 @@ use crate::loom::{
 #[derive(Debug, Clone)]
 pub struct Buffer(Arc<RwLock<Box<[u8]>>>);
 
+impl From<Box<[u8]>> for Buffer {
+    fn from(value: Box<[u8]>) -> Self {
+        Self(Arc::new(RwLock::new(value)))
+    }
+}
+
 impl From<Vec<u8>> for Buffer {
     fn from(value: Vec<u8>) -> Self {
-        Self(Arc::new(RwLock::new(value.into_boxed_slice())))
+        value.into_boxed_slice().into()
     }
 }
 
@@ -44,8 +52,69 @@ impl Buffer {
     }
 
     #[inline]
+    pub fn read_slice<T: Scalar>(&self) -> impl Deref<Target = [T]> {
+        let lock = self.read();
+        let phantom = PhantomData;
+        BufferReader { lock, phantom }
+    }
+
+    #[inline]
+    pub fn write_slice<T: Scalar>(&self) -> impl DerefMut<Target = [T]> {
+        let lock = self.write();
+        let phantom = PhantomData;
+        BufferWriter { lock, phantom }
+    }
+
+    #[inline]
     pub fn into_inner(self) -> Box<[u8]> {
-        self.read().to_vec().into_boxed_slice()
+        match Arc::try_unwrap(self.0) {
+            Ok(inner) => inner.into_inner().expect("lock poisoned"),
+            Err(this) => Self(this).read_slice().to_vec().into_boxed_slice(),
+        }
+    }
+}
+
+pub struct BufferReader<R, T> {
+    lock: R,
+    phantom: PhantomData<T>,
+}
+
+impl<R, T> std::ops::Deref for BufferReader<R, T>
+where
+    R: Deref<Target = Box<[u8]>>,
+    T: Scalar,
+{
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        bytemuck::cast_slice(&self.lock)
+    }
+}
+
+pub struct BufferWriter<W, T> {
+    lock: W,
+    phantom: PhantomData<T>,
+}
+
+impl<R, T> std::ops::Deref for BufferWriter<R, T>
+where
+    R: Deref<Target = Box<[u8]>>,
+    T: Scalar,
+{
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        bytemuck::cast_slice(&self.lock)
+    }
+}
+
+impl<R, T> std::ops::DerefMut for BufferWriter<R, T>
+where
+    R: DerefMut<Target = Box<[u8]>>,
+    T: Scalar,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        bytemuck::cast_slice_mut(&mut self.lock)
     }
 }
 
@@ -86,7 +155,7 @@ impl super::Backend for Backend {
             .buffers
             .get(&id)
             .cloned()
-            .filter(|data| data.read().len() == size);
+            .filter(|data| data.read_slice::<u8>().len() == size);
         let data = match data {
             Some(data) => data,
             None => vec![0; size].into(),
