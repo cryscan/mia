@@ -1,12 +1,28 @@
 use std::{marker::PhantomData, sync::Arc};
 
+use half::f16;
 use mia_derive::TensorOp;
 
 use crate::loom::{
-    device::Backend,
+    device::{Backend, CpuBuilder, GpuBuilder},
     num::Scalar,
-    ops::{BackendOp, InnerOp, TensorIr},
+    ops::{BackendOp, InnerOp, TensorIr, ZeroOp},
 };
+
+impl CpuBuilder {
+    pub fn add_default_ops(self) -> Self {
+        self.add_op::<ZeroOp>()
+            .add_op::<CreateOp>()
+            .add_op::<AddOp<f32>>()
+            .add_op::<AddOp<f16>>()
+    }
+}
+
+impl GpuBuilder {
+    pub fn add_default_ops(self) -> Self {
+        self.add_op::<ZeroOp>().add_op::<CreateOp>()
+    }
+}
 
 #[derive(Debug, Clone, TensorOp)]
 #[tensor_op(crate = "crate")]

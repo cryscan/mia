@@ -3,6 +3,7 @@ use std::{any::Any, borrow::Cow};
 use derive_more::{Deref, DerefMut, Display};
 use dyn_clone::DynClone;
 
+use mia_derive::TensorOp;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -207,8 +208,17 @@ impl<const I: usize, const O: usize> TensorOp for InnerOp<I, O> {
     }
 }
 
-impl<B: Backend, const I: usize, const O: usize> BackendOp<B> for InnerOp<I, O> {
-    async fn execute(&self, _backend: &mut B, _io: Vec<TensorIr>) {
-        // noop
+#[derive(Debug, Clone, TensorOp)]
+#[tensor_op(crate = "crate")]
+pub struct ZeroOp(pub InnerOp<0, 1>);
+
+impl ZeroOp {
+    #[inline]
+    pub fn new(ir: TensorIr) -> Self {
+        Self(InnerOp::new([], [ir]))
     }
+}
+
+impl<B: Backend> BackendOp<B> for ZeroOp {
+    async fn execute(&self, _backend: &mut B, _io: Vec<TensorIr>) {}
 }

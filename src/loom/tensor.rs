@@ -10,7 +10,7 @@ use super::{
     device::Device,
     layout::{IntoLayout, Layout},
     num::{DataType, Scalar},
-    ops::{Access, InnerOp, TensorIr, TensorOp, TensorTape},
+    ops::{Access, TensorIr, TensorOp, TensorTape, ZeroOp},
     slice::Slice,
 };
 
@@ -124,7 +124,7 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
         let layout = layout.into_layout();
         let id = TensorId(uuid::Uuid::new_v4());
         let ir = unsafe { TensorIr::unique::<T>(id, layout.clone(), Access::WriteOnly) };
-        let ops: Vec<Box<dyn TensorOp>> = vec![Box::new(InnerOp::new([], [ir]))];
+        let ops: Vec<Box<dyn TensorOp>> = vec![Box::new(ZeroOp::new(ir))];
         let tape = Arc::new(TensorTape { id, ops });
         let phantom = PhantomData;
         Self {
@@ -143,7 +143,7 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
         let layout = self.layout();
         let id = TensorId(uuid::Uuid::new_v4());
         let ir = unsafe { TensorIr::unique::<T>(id, layout.clone(), Access::WriteOnly) };
-        let ops: Vec<Box<dyn TensorOp>> = vec![Box::new(InnerOp::new([], [ir]))];
+        let ops: Vec<Box<dyn TensorOp>> = vec![Box::new(ZeroOp::new(ir))];
         let tape = Arc::new(TensorTape { id, ops });
         let phantom = PhantomData;
         Self {
