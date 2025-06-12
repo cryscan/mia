@@ -66,6 +66,10 @@ wgpu = "25.0"
 # version = "0.0"
 path = "crates/mia_derive"
 
+[dependencies.rayon]
+optional = true
+version = "1.10"
+
 [dependencies.tokio]
 default-features = false
 features = ["macros", "rt", "sync", "time"]
@@ -78,7 +82,9 @@ wasm-bindgen-test = "0.3"
 default = ["native"]
 
 ## Enables on native platforms.
-native = ["subgroup-ops", "tokio/rt-multi-thread"]
+native = ["rayon", "subgroup-ops", "tokio/rt-multi-thread"]
+## Enables `rayon` for parallel CPU kernels.
+rayon = ["dep:rayon"]
 ## Enables `serde` on types.
 serde = [
     "dep:serde",

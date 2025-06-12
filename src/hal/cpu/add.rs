@@ -1,5 +1,4 @@
 use half::f16;
-use itertools::Itertools;
 
 use crate::{
     hal::ops::AddOp,
@@ -11,7 +10,10 @@ use crate::{
 
 impl BackendOp<Backend> for AddOp<f32> {
     async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        #[cfg(not(feature = "rayon"))]
         let output = {
+            use itertools::Itertools;
+
             let x = backend.fetch(io[0].id);
             let y = backend.fetch(io[1].id);
 
@@ -24,13 +26,38 @@ impl BackendOp<Backend> for AddOp<f32> {
                 .flat_map(|z| z.to_ne_bytes())
                 .collect()
         };
+        #[cfg(feature = "rayon")]
+        let output = {
+            use rayon::prelude::*;
+
+            let x = backend.fetch(io[0].id);
+            let y = backend.fetch(io[1].id);
+
+            let (sender, receiver) = flume::bounded(0);
+            crate::loom::platform::spawn_blocking(move || {
+                let x = x.read_slice::<f32>();
+                let y = y.read_slice::<f32>();
+
+                let output = x
+                    .par_iter()
+                    .zip_eq(y.par_iter())
+                    .map(|(x, y)| x + y)
+                    .flat_map(|z| z.to_ne_bytes())
+                    .collect();
+                _ = sender.send(output);
+            });
+            receiver.recv_async().await.expect("failed to receive")
+        };
         *backend.fetch(io[2].id).write() = output;
     }
 }
 
 impl BackendOp<Backend> for AddOp<f16> {
     async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        #[cfg(not(feature = "rayon"))]
         let output = {
+            use itertools::Itertools;
+
             let x = backend.fetch(io[0].id);
             let y = backend.fetch(io[1].id);
 
@@ -42,6 +69,28 @@ impl BackendOp<Backend> for AddOp<f16> {
                 .map(|(x, y)| x + y)
                 .flat_map(|z| z.to_ne_bytes())
                 .collect()
+        };
+        #[cfg(feature = "rayon")]
+        let output = {
+            use rayon::prelude::*;
+
+            let x = backend.fetch(io[0].id);
+            let y = backend.fetch(io[1].id);
+
+            let (sender, receiver) = flume::bounded(0);
+            crate::loom::platform::spawn_blocking(move || {
+                let x = x.read_slice::<f16>();
+                let y = y.read_slice::<f16>();
+
+                let output = x
+                    .par_iter()
+                    .zip_eq(y.par_iter())
+                    .map(|(x, y)| x + y)
+                    .flat_map(|z| z.to_ne_bytes())
+                    .collect();
+                _ = sender.send(output);
+            });
+            receiver.recv_async().await.expect("failed to receive")
         };
         *backend.fetch(io[2].id).write() = output;
     }
@@ -72,7 +121,7 @@ mod tests {
 
         let r#ref = data
             .iter()
-            .map(|&x| x + x + x + x)
+            .map(|x| x + x + x + x)
             .collect_vec()
             .into_boxed_slice();
 
