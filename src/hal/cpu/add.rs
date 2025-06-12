@@ -1,24 +1,26 @@
+use glam::Vec4;
 use half::f16;
 
 use crate::{
     hal::ops::AddOp,
     loom::{
         device::{Backend as _, cpu::Backend},
+        num::F32x4,
         ops::{BackendOp, TensorIr},
     },
 };
 
 impl BackendOp<Backend> for AddOp<f32> {
     async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        let x = backend.fetch(io[0].id);
+        let y = backend.fetch(io[1].id);
+
+        let x = x.read_slice::<f32>();
+        let y = y.read_slice::<f32>();
+
         #[cfg(not(feature = "rayon"))]
         let output = {
             use itertools::Itertools;
-
-            let x = backend.fetch(io[0].id);
-            let y = backend.fetch(io[1].id);
-
-            let x = x.read_slice::<f32>();
-            let y = y.read_slice::<f32>();
 
             x.iter()
                 .zip_eq(y.iter())
@@ -29,12 +31,6 @@ impl BackendOp<Backend> for AddOp<f32> {
         #[cfg(feature = "rayon")]
         let output = {
             use rayon::prelude::*;
-
-            let x = backend.fetch(io[0].id);
-            let y = backend.fetch(io[1].id);
-
-            let x = x.read_slice::<f16>();
-            let y = y.read_slice::<f16>();
 
             x.par_iter()
                 .zip_eq(y.par_iter())
@@ -48,15 +44,15 @@ impl BackendOp<Backend> for AddOp<f32> {
 
 impl BackendOp<Backend> for AddOp<f16> {
     async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        let x = backend.fetch(io[0].id);
+        let y = backend.fetch(io[1].id);
+
+        let x = x.read_slice::<f16>();
+        let y = y.read_slice::<f16>();
+
         #[cfg(not(feature = "rayon"))]
         let output = {
             use itertools::Itertools;
-
-            let x = backend.fetch(io[0].id);
-            let y = backend.fetch(io[1].id);
-
-            let x = x.read_slice::<f16>();
-            let y = y.read_slice::<f16>();
 
             x.iter()
                 .zip_eq(y.iter())
@@ -68,15 +64,47 @@ impl BackendOp<Backend> for AddOp<f16> {
         let output = {
             use rayon::prelude::*;
 
-            let x = backend.fetch(io[0].id);
-            let y = backend.fetch(io[1].id);
-
-            let x = x.read_slice::<f16>();
-            let y = y.read_slice::<f16>();
-
             x.par_iter()
                 .zip_eq(y.par_iter())
                 .map(|(x, y)| x + y)
+                .flat_map(|z| z.to_ne_bytes())
+                .collect()
+        };
+        *backend.fetch(io[2].id).write() = output;
+    }
+}
+
+impl BackendOp<Backend> for AddOp<F32x4> {
+    async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        let x = backend.fetch(io[0].id);
+        let y = backend.fetch(io[1].id);
+
+        let x = x.read_slice::<F32x4>();
+        let y = y.read_slice::<F32x4>();
+
+        #[cfg(not(feature = "rayon"))]
+        let output = {
+            use itertools::Itertools;
+
+            x.iter()
+                .map(|x| x.0)
+                .map(Vec4::from_array)
+                .zip_eq(y.iter().map(|y| y.0).map(Vec4::from_array))
+                .map(|(x, y)| x + y)
+                .flat_map(|z| z.to_array())
+                .flat_map(|z| z.to_ne_bytes())
+                .collect()
+        };
+        #[cfg(feature = "rayon")]
+        let output = {
+            use rayon::prelude::*;
+
+            x.par_iter()
+                .map(|x| x.0)
+                .map(Vec4::from_array)
+                .zip_eq(y.par_iter().map(|y| y.0).map(Vec4::from_array))
+                .map(|(x, y)| x + y)
+                .flat_map(|z| z.to_array())
                 .flat_map(|z| z.to_ne_bytes())
                 .collect()
         };
