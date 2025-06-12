@@ -46,3 +46,44 @@ impl BackendOp<Backend> for AddOp<f16> {
         *backend.fetch(io[2].id).write() = output;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{error::Error, sync::Arc};
+
+    use half::f16;
+    use itertools::Itertools;
+
+    use crate::loom::{device::CpuBuilder, tensor::Tensor};
+
+    #[tokio::test]
+    async fn test_add() -> Result<(), Box<dyn Error>> {
+        let cpu = CpuBuilder::new().add_default_ops().build().await;
+        let cpu = Arc::new(cpu);
+
+        let data = (0..12).map(|x| f16::from_f32(x as f32)).collect_vec();
+
+        let a = Tensor::create(cpu.clone(), [4, 3], data.clone())?;
+        let b = Tensor::create(cpu.clone(), [4, 3], data.clone())?;
+        let b = a.clone() + b;
+
+        let c = Tensor::create(cpu.clone(), [4, 3], data.clone())?;
+        let d = a + b.clone() + c;
+
+        let r#ref = data
+            .iter()
+            .map(|&x| x + x + x + x)
+            .collect_vec()
+            .into_boxed_slice();
+
+        let output = d.back().await?;
+        assert_eq!(output, r#ref);
+
+        let d = b.clone() + b;
+
+        let output = d.back().await?;
+        assert_eq!(output, r#ref);
+
+        Ok(())
+    }
+}

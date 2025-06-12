@@ -220,5 +220,20 @@ impl ZeroOp {
 }
 
 impl<B: Backend> BackendOp<B> for ZeroOp {
-    async fn execute(&self, _backend: &mut B, _io: Vec<TensorIr>) {}
+    async fn execute(&self, _: &mut B, _: Vec<TensorIr>) {}
+}
+
+#[derive(Debug, Clone, TensorOp)]
+#[tensor_op(crate = "crate")]
+pub struct OneOp(pub InnerOp<1, 0>);
+
+impl OneOp {
+    #[inline]
+    pub fn new(ir: TensorIr) -> Self {
+        Self(InnerOp::new([ir], []))
+    }
+}
+
+impl<B: Backend> BackendOp<B> for OneOp {
+    async fn execute(&self, _: &mut B, _: Vec<TensorIr>) {}
 }

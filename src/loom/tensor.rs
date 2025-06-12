@@ -18,7 +18,7 @@ use super::{
 pub enum TensorError {
     #[error("tensor type error: data type {0} mismatches {1}")]
     Type(DataType, DataType),
-    #[error("tensor creation error: layout {0}'s size not match data len {1}")]
+    #[error("tensor creation error: layout {0}'s co-size not match data len {1}")]
     Create(Layout, usize),
     #[error("tensor reshape error: layout {0}'s size not match layout {1}'s")]
     Reshape(Layout, Layout),

@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{borrow::Cow, marker::PhantomData};
 
 use half::f16;
 use mia_derive::TensorOp;
@@ -29,7 +29,7 @@ impl GpuBuilder {
 pub struct CreateOp {
     #[tensor_op]
     pub op: InnerOp<0, 1>,
-    pub contents: Arc<[u8]>,
+    pub contents: Cow<'static, [u8]>,
 }
 
 impl<B: Backend> BackendOp<B> for CreateOp {
