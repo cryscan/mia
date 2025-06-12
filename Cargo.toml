@@ -76,6 +76,7 @@ features = ["macros", "rt", "sync", "time"]
 version = "1.45"
 
 [dev-dependencies]
+rayon = "1.10"
 wasm-bindgen-test = "0.3"
 
 [features]
