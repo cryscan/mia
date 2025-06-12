@@ -13,7 +13,7 @@ use crate::loom::{
 
 fn binary_op_unchecked<D, T, Op>(lhs: Tensor<D, T>, rhs: Tensor<D, T>) -> Tensor<D, T>
 where
-    D: Device,
+    D: Device + Clone,
     T: Scalar,
     Op: From<InnerOp<2, 1>> + TensorOp,
 {
@@ -34,7 +34,7 @@ where
     output
 }
 
-impl<D: Device, T: Scalar> Tensor<D, T> {
+impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
     /// Replace the inner ops recorded on the tape of the tensor. Panics if the tensor isn't unique.
     fn replace_ops(&mut self, ops: Vec<Box<dyn TensorOp>>) -> Vec<Box<dyn TensorOp>> {
         let tape = self.as_mut();
@@ -42,11 +42,11 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
         std::mem::replace(&mut tape.ops, ops)
     }
 
-    pub fn create(
-        device: Arc<D>,
-        layout: impl IntoLayout,
-        contents: impl Into<Cow<'static, [T]>>,
-    ) -> Result<Self, TensorError> {
+    pub fn create<L, C>(device: D, layout: L, contents: C) -> Result<Self, TensorError>
+    where
+        L: IntoLayout,
+        C: Into<Cow<'static, [T]>>,
+    {
         let layout = layout.into_layout();
         let contents: Cow<'static, [T]> = contents.into();
         if layout.co_size() > contents.len() {
@@ -87,7 +87,7 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
     }
 }
 
-impl<D: Device, T: Scalar> std::ops::Add<Tensor<D, T>> for Tensor<D, T> {
+impl<D: Device + Clone, T: Scalar> std::ops::Add<Tensor<D, T>> for Tensor<D, T> {
     type Output = Tensor<D, T>;
 
     fn add(self, rhs: Tensor<D, T>) -> Self::Output {

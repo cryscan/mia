@@ -98,7 +98,7 @@ impl BackendOp<Backend> for AddOp<f16> {
 
 #[cfg(test)]
 mod tests {
-    use std::{error::Error, sync::Arc};
+    use std::error::Error;
 
     use half::f16;
     use itertools::Itertools;
@@ -108,7 +108,6 @@ mod tests {
     #[tokio::test]
     async fn test_add() -> Result<(), Box<dyn Error>> {
         let cpu = CpuBuilder::new().add_default_ops().build().await;
-        let cpu = Arc::new(cpu);
 
         let data = (0..12).map(|x| f16::from_f32(x as f32)).collect_vec();
 

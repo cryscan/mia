@@ -39,7 +39,7 @@ pub struct TensorId(pub uuid::Uuid);
 /// A statically typed tensor. Good to fit into typed APIs.
 #[derive(Debug, Clone, PartialEq, Eq, AsRef, AsMut)]
 pub struct Tensor<D, T> {
-    device: Arc<D>,
+    device: D,
     layout: Layout,
     id: TensorId,
     #[as_ref]
@@ -117,10 +117,10 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
     }
 }
 
-impl<D: Device, T: Scalar> Tensor<D, T> {
+impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
     /// Create a tensor of zeros.
     #[inline]
-    pub fn zeros(device: Arc<D>, layout: impl IntoLayout) -> Self {
+    pub fn zeros(device: D, layout: impl IntoLayout) -> Self {
         let layout = layout.into_layout();
         let id = TensorId(uuid::Uuid::new_v4());
         let ir = unsafe { TensorIr::unique::<T>(id, layout.clone(), Access::WriteOnly) };
