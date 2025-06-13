@@ -21,7 +21,7 @@ pub fn derive_tensor_op(input: TokenStream) -> TokenStream {
 
     // determine the field access expression for trait forwarding
     let forward_access = match fields {
-        // tuple struct: Must have exactly one field
+        // tuple struct: must have exactly one field
         Fields::Unnamed(fields_unnamed) => {
             if fields_unnamed.unnamed.len() != 1 {
                 return syn::Error::new(
@@ -34,7 +34,7 @@ pub fn derive_tensor_op(input: TokenStream) -> TokenStream {
             // access the single tuple field
             quote! { self.0 }
         }
-        // named struct: Require exactly one #[tensor_op] attribute
+        // named struct: require exactly one #[tensor_op] attribute
         Fields::Named(fields_named) => {
             // collect fields with #[tensor_op] attribute
             let marked_fields: Vec<_> = fields_named
