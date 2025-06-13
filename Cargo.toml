@@ -88,6 +88,8 @@ native = ["rayon", "subgroup-ops", "tokio/rt-multi-thread"]
 rayon = ["dep:rayon"]
 ## Enables `serde` on types.
 serde = ["dep:serde", "dep:serde_bytes", "half/serde", "u4/serde", "uuid/serde"]
+## Enables strict mode for backends. Panics on unknown ops.
+strict = []
 ## Enables subgroup operations in the kernels. Accelerates the inference on some device.
 subgroup-ops = []
 ## Enables performance tracing.
