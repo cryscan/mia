@@ -167,10 +167,9 @@ impl BackendOp<Backend> for AddOp<F16x4> {
 
 #[cfg(test)]
 mod tests {
-    use std::error::Error;
+    use std::{error::Error, sync::Arc};
 
     use half::f16;
-    use itertools::Itertools;
     use rayon::prelude::*;
 
     use crate::loom::{device::CpuBuilder, num::F32x4, tensor::Tensor};
@@ -181,7 +180,7 @@ mod tests {
         const C: usize = 1024;
         const T: usize = 768;
 
-        let data = (0..C * T).map(|x| f16::from_f32(x as f32)).collect_vec();
+        let data: Arc<[f16]> = (0..C * T).map(|x| f16::from_f32(x as f32)).collect();
 
         let a = Tensor::create(cpu.clone(), [C, T], data.clone())?;
         let b = Tensor::create(cpu.clone(), [C, T], data.clone())?;
@@ -209,7 +208,7 @@ mod tests {
         const C: usize = 1024;
         const T: usize = 768;
 
-        let data = (0..C * T).map(|x| x as f32).collect_vec();
+        let data: Arc<[f32]> = (0..C * T).map(|x| x as f32).collect();
 
         let a = Tensor::create(cpu.clone(), [C, T], data.clone())?.cast::<F32x4>([C / 4, T])?;
         let b = Tensor::create(cpu.clone(), [C, T], data.clone())?.cast::<F32x4>([C / 4, T])?;

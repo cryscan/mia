@@ -1,4 +1,4 @@
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 
 use itertools::Itertools;
 
@@ -45,19 +45,16 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
     pub fn create<L, C>(device: D, layout: L, contents: C) -> Result<Self, TensorError>
     where
         L: IntoLayout,
-        C: Into<Cow<'static, [T]>>,
+        C: Into<Arc<[T]>>,
     {
         let layout = layout.into_layout();
-        let contents: Cow<'static, [T]> = contents.into();
+        let contents: Arc<[T]> = contents.into();
+
         if layout.co_size() > contents.len() {
             return Err(TensorError::Create(layout, contents.len()));
         }
 
         let mut output = Tensor::<D, T>::zeros(device, layout);
-        let contents = match contents {
-            Cow::Borrowed(contents) => bytemuck::cast_slice(contents).into(),
-            Cow::Owned(contents) => bytemuck::cast_slice(&contents).to_vec().into(),
-        };
         let op = InnerOp::new([], [output.ir(Access::WriteOnly)]);
         let op = CreateOp { op, contents };
         let ops: Vec<Box<dyn TensorOp>> = vec![Box::new(op)];

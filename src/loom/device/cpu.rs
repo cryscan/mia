@@ -37,11 +37,6 @@ impl From<Vec<u8>> for Buffer {
 
 impl Buffer {
     #[inline]
-    pub fn new(contents: &[u8]) -> Self {
-        contents.to_vec().into()
-    }
-
-    #[inline]
     pub fn read(&self) -> impl Deref<Target = Box<[u8]>> {
         self.0.read().expect("failed to lock buffer")
     }
@@ -146,7 +141,7 @@ impl super::Backend for Backend {
     #[inline]
     fn create(&mut self, id: TensorId, contents: &[u8]) -> Self::Data {
         let id = self.allocator().retrieve(id);
-        let data = Self::Data::new(contents);
+        let data = Self::Data::from(contents.to_vec());
         self.buffers.insert(id, data.clone());
         data
     }
