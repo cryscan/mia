@@ -5,7 +5,7 @@ use mia_derive::TensorOp;
 
 use crate::loom::{
     device::{Backend, CpuBuilder, GpuBuilder},
-    num::Scalar,
+    num::{F16x4, F32x4, Scalar},
     ops::{BackendOp, InnerOp, TensorIr, ZeroOp},
 };
 
@@ -15,6 +15,8 @@ impl CpuBuilder {
             .add_op::<CreateOp>()
             .add_op::<AddOp<f32>>()
             .add_op::<AddOp<f16>>()
+            .add_op::<AddOp<F32x4>>()
+            .add_op::<AddOp<F16x4>>()
     }
 }
 

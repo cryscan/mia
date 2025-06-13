@@ -1,7 +1,11 @@
+#[cfg(target_arch = "wasm32")]
+use std::rc::Rc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Mutex;
 use std::{
     any::TypeId,
     cell::{RefCell, RefMut},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 use itertools::Itertools;
@@ -271,18 +275,25 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         v.append(&mut backend.uploads);
                         uploads.insert(id, v);
 
-                        let mut v = commands.remove(&id).unwrap_or(Vec::new());
+                        #[cfg(not(target_arch = "wasm32"))]
                         let command = Arc::new(Mutex::new(None));
+                        #[cfg(target_arch = "wasm32")]
+                        let command = Rc::new(RefCell::new(None));
+
+                        let mut v = commands.remove(&id).unwrap_or(Vec::new());
                         v.push(command.clone());
                         commands.insert(id, v);
 
                         let device = backend.device.clone();
                         let kernels = std::mem::take(&mut backend.kernels);
-                        platform::spawn_blocking(move || {
+                        platform::dispatch(move || {
+                            #[cfg(not(target_arch = "wasm32"))]
                             command
                                 .lock()
                                 .expect("failed to lock command")
                                 .replace(encode(&device, &kernels));
+                            #[cfg(target_arch = "wasm32")]
+                            command.borrow_mut().replace(encode(&device, &kernels));
                             _ = sender.send(Ok(id))
                         });
                     }
@@ -320,16 +331,22 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         let device = backend.device.clone();
                         let queue = backend.queue.clone();
                         let kernels = std::mem::take(&mut backend.kernels);
-                        platform::spawn_blocking(move || {
+                        platform::dispatch(move || {
                             // 1. upload data into input buffers
                             uploads
                                 .into_iter()
                                 .for_each(|(buffer, data)| queue.write_buffer(&buffer, 0, &data));
 
                             // 2. encode remaining commands
+                            #[cfg(not(target_arch = "wasm32"))]
                             let mut commands = commands
                                 .into_iter()
                                 .flat_map(|x| x.lock().expect("failed to lock command").take())
+                                .collect_vec();
+                            #[cfg(target_arch = "wasm32")]
+                            let mut commands = commands
+                                .into_iter()
+                                .flat_map(|x| x.borrow_mut().take())
                                 .collect_vec();
                             commands.push(encode(&device, &kernels));
 

@@ -20,9 +20,9 @@ pub enum TensorError {
     Type(DataType, DataType),
     #[error("tensor creation error: layout {0}'s co-size not match data len {1}")]
     Create(Layout, usize),
-    #[error("tensor reshape error: layout {0}'s size not match layout {1}'s")]
+    #[error("tensor reshape error: layout {0}'s co-size not match layout {1}'s")]
     Reshape(Layout, Layout),
-    #[error("tensor cast error: data size before casting ({0}) not match that after ({1})")]
+    #[error("tensor cast error: data size {0} not match {1}")]
     Cast(usize, usize),
     #[error("tensor slice error: slice {1} is not compatible with layout {0}")]
     Slice(Layout, Slice),
@@ -71,12 +71,12 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
 
     #[inline]
     pub fn data_count(&self) -> usize {
-        self.layout.size() * T::DATA_TYPE.count()
+        self.layout.co_size() * T::DATA_TYPE.count()
     }
 
     #[inline]
     pub fn data_size(&self) -> usize {
-        self.layout.size() * size_of::<T>()
+        self.layout.co_size() * size_of::<T>()
     }
 
     #[inline]
@@ -88,8 +88,8 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
     #[inline]
     pub fn reshape(mut self, layout: impl IntoLayout) -> Result<Self, TensorError> {
         let layout = layout.into_layout();
-        if self.layout.size() != layout.size() {
-            return Err(TensorError::Reshape(self.layout, layout));
+        if layout.co_size() != self.layout.co_size() {
+            return Err(TensorError::Reshape(layout, self.layout));
         }
         self.layout = layout;
         Ok(self)
@@ -99,7 +99,7 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
     #[inline]
     pub fn cast<U: Scalar>(self, layout: impl IntoLayout) -> Result<Tensor<D, U>, TensorError> {
         let layout = layout.into_layout();
-        let size = layout.size() * U::DATA_TYPE.count();
+        let size = layout.co_size() * size_of::<U>();
         if self.data_size() != size {
             return Err(TensorError::Cast(self.data_size(), size));
         }

@@ -19,7 +19,7 @@ where
 
 #[cfg(not(target_arch = "wasm32"))]
 #[inline]
-pub fn spawn_blocking<F, R>(f: F) -> tokio::task::JoinHandle<R>
+pub fn dispatch<F, R>(f: F) -> tokio::task::JoinHandle<R>
 where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
@@ -29,7 +29,28 @@ where
 
 #[cfg(target_arch = "wasm32")]
 #[inline]
-pub fn spawn_blocking<F, R>(f: F) -> R
+pub fn dispatch<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R + 'static,
+    R: 'static,
+{
+    f()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[inline]
+pub async fn handle<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+{
+    let handle = tokio::task::spawn_blocking(f);
+    handle.await.expect("failed to execute remote task")
+}
+
+#[cfg(target_arch = "wasm32")]
+#[inline]
+pub async fn handle<F, R>(f: F) -> R
 where
     F: FnOnce() -> R + 'static,
     R: 'static,

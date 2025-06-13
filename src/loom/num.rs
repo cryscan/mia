@@ -5,6 +5,7 @@ use u4::AsNibbles;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use wide::f32x4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -110,6 +111,18 @@ impl From<U8x4> for u32 {
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[repr(C)]
 pub struct F32x4(pub [f32; 4]);
+
+impl From<f32x4> for F32x4 {
+    fn from(value: f32x4) -> Self {
+        Self(value.to_array())
+    }
+}
+
+impl From<F32x4> for f32x4 {
+    fn from(value: F32x4) -> Self {
+        f32x4::new(value.0)
+    }
+}
 
 #[derive(Debug, Default, Clone, Copy, Deref, DerefMut, From, Into)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
