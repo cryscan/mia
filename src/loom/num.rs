@@ -296,7 +296,18 @@ impl Scalar for F16x4 {
     const DATA_TYPE: DataType = DataType::F16x4;
 }
 
-pub trait Float: Scalar {}
+pub trait Float:
+    Scalar
+    + std::ops::Add<Output = Self>
+    + std::ops::Sub<Output = Self>
+    + std::ops::Mul<Output = Self>
+    + std::ops::Div<Output = Self>
+    + std::ops::AddAssign
+    + std::ops::SubAssign
+    + std::ops::MulAssign
+    + std::ops::DivAssign
+{
+}
 
 impl Float for f32 {}
 impl Float for f16 {}

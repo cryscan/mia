@@ -31,6 +31,25 @@ impl GpuBuilder {
     }
 }
 
+macro_rules! impl_op_from_inner {
+    ($op:ty, $f:ty) => {
+        impl From<$f> for $op {
+            fn from(op: $f) -> Self {
+                let phantom = PhantomData;
+                Self { op, phantom }
+            }
+        }
+    };
+    ($op:ty, $f:ty, $($t:ident: $b:ident),+) => {
+        impl<$($t: $b),+> From<$f> for $op {
+            fn from(op: $f) -> Self {
+                let phantom = PhantomData;
+                Self { op, phantom }
+            }
+        }
+    };
+}
+
 #[derive(Debug, Clone, TensorOp)]
 #[tensor_op(crate = "crate")]
 pub struct CreateOp<T: Scalar> {
@@ -54,11 +73,14 @@ pub struct AddOp<T> {
     pub phantom: PhantomData<T>,
 }
 
-impl<T: Scalar> From<InnerOp<2, 1>> for AddOp<T> {
-    fn from(value: InnerOp<2, 1>) -> Self {
-        Self {
-            op: value,
-            phantom: PhantomData,
-        }
-    }
+impl_op_from_inner!(AddOp<T>, InnerOp<2, 1>, T: Scalar);
+
+#[derive(Debug, Clone, TensorOp)]
+#[tensor_op(crate = "crate", bound = "T: Scalar")]
+pub struct LayerNormOp<T> {
+    #[tensor_op]
+    pub op: InnerOp<1, 1>,
+    pub phantom: PhantomData<T>,
 }
+
+impl_op_from_inner!(LayerNormOp<T>, InnerOp<1, 1>, T: Scalar);
