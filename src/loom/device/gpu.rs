@@ -48,9 +48,9 @@ impl super::Backend for Backend {
         let id = &op.type_id();
         match self.ops.get(id).cloned() {
             Some(f) => f(self, op, io).await,
-            #[cfg(feature = "strict")]
-            None => log::error!("unable to execute op of type {}", op.name()),
             #[cfg(not(feature = "strict"))]
+            None => log::error!("unable to execute op of type {}", op.name()),
+            #[cfg(feature = "strict")]
             None => panic!("unable to execute op of type {}", op.name()),
         }
     }
