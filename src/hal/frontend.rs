@@ -1,14 +1,18 @@
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
+use half::f16;
 use itertools::Itertools;
 
 use super::ops::{AddOp, CreateOp};
-use crate::loom::{
-    device::{Device, DeviceError, DeviceEvent},
-    layout::IntoLayout,
-    num::Scalar,
-    ops::{Access, InnerOp, OneOp, TensorOp},
-    tensor::{Tensor, TensorError},
+use crate::{
+    hal::ops::SoftmaxOp,
+    loom::{
+        device::{Device, DeviceError, DeviceEvent},
+        layout::IntoLayout,
+        num::{Float, Scalar},
+        ops::{Access, InnerOp, OneOp, TensorOp},
+        tensor::{Tensor, TensorError},
+    },
 };
 
 fn binary_op_unchecked<D, T, Op>(lhs: Tensor<D, T>, rhs: Tensor<D, T>) -> Tensor<D, T>
@@ -18,7 +22,7 @@ where
     Op: From<InnerOp<2, 1>> + TensorOp,
 {
     let mut output = Tensor::zeros_like(&lhs);
-    let mut ops = [lhs.as_ref().ops.clone(), rhs.as_ref().ops.clone()]
+    let mut ops = [lhs.tape().ops.clone(), rhs.tape().ops.clone()]
         .concat()
         .into_iter()
         .unique()
@@ -28,8 +32,7 @@ where
     let outputs = [output.ir(Access::WriteOnly)];
     let op = Op::from(InnerOp::new(inputs, outputs));
     ops.push(Box::new(op));
-
-    _ = output.replace_ops(ops);
+    output.replace_ops(ops);
 
     output
 }
@@ -58,8 +61,7 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
         let op = InnerOp::new([], [output.ir(Access::WriteOnly)]);
         let op = CreateOp { op, contents };
         let ops: Vec<Box<dyn TensorOp>> = vec![Box::new(op)];
-
-        _ = output.replace_ops(ops);
+        output.replace_ops(ops);
 
         Ok(output)
     }
@@ -98,5 +100,26 @@ impl<D: Device + Clone, T: Scalar> std::ops::Add<Tensor<D, T>> for Tensor<D, T> 
 
     fn add(self, rhs: Tensor<D, T>) -> Self::Output {
         self.try_add(rhs).unwrap()
+    }
+}
+
+impl<D: Device + Clone, T: Float> Tensor<D, T> {
+    #[inline]
+    pub fn softmax(self) -> Self {
+        let mut output = Tensor::<D, T>::zeros_like(&self);
+        let mut ops = self.tape().ops.clone();
+
+        let phantom = PhantomData;
+        let op = InnerOp::new([self.ir(Access::ReadOnly)], [output.ir(Access::WriteOnly)]);
+        let op = SoftmaxOp::<T> { op, phantom };
+        ops.push(Box::new(op));
+
+        output.replace_ops(ops);
+        output
+    }
+
+    #[inline]
+    pub fn layer_norm(self, _w: Tensor<D, f16>, _b: Tensor<D, f16>) -> Result<Self, TensorError> {
+        todo!()
     }
 }
