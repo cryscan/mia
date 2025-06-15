@@ -19,6 +19,8 @@ impl CpuBuilder {
             .add_op::<AddOp<f16>>()
             .add_op::<AddOp<F32x4>>()
             .add_op::<AddOp<F16x4>>()
+            .add_op::<LayerNormOp<f32>>()
+            .add_op::<LayerNormOp<f16>>()
     }
 }
 

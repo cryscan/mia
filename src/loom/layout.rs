@@ -391,6 +391,13 @@ impl Layout {
         self[mode].1
     }
 
+    /// Retrieves the span of a specific mode in the layout.
+    /// Span is the product of shape and stride.
+    #[inline]
+    pub fn span_of(&self, mode: usize) -> usize {
+        self.shape_of(mode) * self.stride_of(mode)
+    }
+
     /// Returns `true` if the layout is of size 0.
     #[inline]
     pub fn is_zero(&self) -> bool {
