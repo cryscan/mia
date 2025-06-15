@@ -19,6 +19,8 @@ impl CpuBuilder {
             .add_op::<AddOp<f16>>()
             .add_op::<AddOp<F32x4>>()
             .add_op::<AddOp<F16x4>>()
+            .add_op::<SoftmaxOp<f32>>()
+            .add_op::<SoftmaxOp<f16>>()
             .add_op::<LayerNormOp<f32>>()
             .add_op::<LayerNormOp<f16>>()
     }
@@ -33,7 +35,7 @@ impl GpuBuilder {
     }
 }
 
-macro_rules! impl_op_from_inner {
+macro_rules! impl_op_from {
     ($op:ty, $f:ty) => {
         impl From<$f> for $op {
             fn from(op: $f) -> Self {
@@ -75,14 +77,21 @@ pub struct AddOp<T> {
     pub phantom: PhantomData<T>,
 }
 
-impl_op_from_inner!(AddOp<T>, InnerOp<2, 1>, T: Scalar);
+impl_op_from!(AddOp<T>, InnerOp<2, 1>, T: Scalar);
 
 #[derive(Debug, Clone, TensorOp)]
 #[tensor_op(crate = "crate", bound = "T: Scalar")]
-pub struct LayerNormOp<T> {
+pub struct SoftmaxOp<T> {
     #[tensor_op]
     pub op: InnerOp<1, 1>,
     pub phantom: PhantomData<T>,
 }
 
-impl_op_from_inner!(LayerNormOp<T>, InnerOp<1, 1>, T: Scalar);
+#[derive(Debug, Clone, TensorOp)]
+#[tensor_op(crate = "crate", bound = "T: Scalar")]
+pub struct LayerNormOp<T> {
+    #[tensor_op]
+    pub op: InnerOp<3, 1>,
+    pub eps: f32,
+    pub phantom: PhantomData<T>,
+}
