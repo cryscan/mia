@@ -11,7 +11,7 @@ use crate::{
         layout::IntoLayout,
         num::{Float, Scalar},
         ops::{Access, InnerOp, OneOp, TensorOp},
-        tensor::{Tensor, TensorError},
+        tensor::Tensor,
     },
 };
 
@@ -38,42 +38,32 @@ where
 }
 
 impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
-    /// Replace the inner ops recorded on the tape of the tensor. Panics if the tensor isn't unique.
+    /// Replace the inner ops recorded on the tape of the tensor.
     fn replace_ops(&mut self, ops: Vec<Box<dyn TensorOp>>) -> Vec<Box<dyn TensorOp>> {
-        let tape = self.as_mut();
-        let tape = Arc::get_mut(tape).expect("must be unique");
+        let tape = self.tape_mut();
         std::mem::replace(&mut tape.ops, ops)
     }
 
-    pub fn create<L, C>(device: D, layout: L, contents: C) -> Result<Self, TensorError>
+    /// Create a new tensor with the given device, layout, and contents.
+    pub fn create<L, C>(device: D, layout: L, contents: C) -> Self
     where
         L: IntoLayout,
         C: Into<Arc<[T]>>,
     {
         let layout = layout.into_layout();
         let contents: Arc<[T]> = contents.into();
+        let size = contents.len() * size_of::<T>();
 
-        if layout.co_size() > contents.len() {
-            return Err(TensorError::Create(layout, contents.len()));
-        }
-
-        let mut output = Tensor::<D, T>::zeros(device, layout);
+        let mut output = Tensor::<D, T>::zeros(device, layout, size);
         let op = InnerOp::new([], [output.ir(Access::WriteOnly)]);
         let op = CreateOp { op, contents };
         let ops: Vec<Box<dyn TensorOp>> = vec![Box::new(op)];
         output.replace_ops(ops);
 
-        Ok(output)
+        output
     }
 
-    #[inline]
-    pub fn try_add(self, rhs: Tensor<D, T>) -> Result<Self, TensorError> {
-        if self.layout() != rhs.layout() {
-            return Err(TensorError::Layout(self.layout(), rhs.layout()));
-        }
-        Ok(binary_op_unchecked::<_, _, AddOp<T>>(self, rhs))
-    }
-
+    /// Read back the contents of the tensor from the device.
     #[inline]
     pub async fn back(self) -> Result<Box<[T]>, DeviceError> {
         let (sender, receiver) = flume::bounded(0);
@@ -99,7 +89,8 @@ impl<D: Device + Clone, T: Scalar> std::ops::Add<Tensor<D, T>> for Tensor<D, T> 
     type Output = Tensor<D, T>;
 
     fn add(self, rhs: Tensor<D, T>) -> Self::Output {
-        self.try_add(rhs).unwrap()
+        assert_eq!(self.layout(), rhs.layout(), "tensor layouts must match");
+        binary_op_unchecked::<_, _, AddOp<T>>(self, rhs)
     }
 }
 
@@ -119,7 +110,7 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
     }
 
     #[inline]
-    pub fn layer_norm(self, _w: Tensor<D, f16>, _b: Tensor<D, f16>) -> Result<Self, TensorError> {
+    pub fn layer_norm(self, _w: Tensor<D, f16>, _b: Tensor<D, f16>) -> Self {
         todo!()
     }
 }

@@ -182,11 +182,11 @@ mod tests {
 
         let data: Arc<[f16]> = (0..C * T).map(|x| f16::from_f32(x as f32)).collect();
 
-        let a = Tensor::create(cpu.clone(), [C, T], data.clone())?;
-        let b = Tensor::create(cpu.clone(), [C, T], data.clone())?;
+        let a = Tensor::create(cpu.clone(), [C, T], data.clone());
+        let b = Tensor::create(cpu.clone(), [C, T], data.clone());
         let b = a.clone() + b;
 
-        let c = Tensor::create(cpu.clone(), [C, T], data.clone())?;
+        let c = Tensor::create(cpu.clone(), [C, T], data.clone());
         let d = a + b.clone() + c;
 
         let r#ref = data.par_iter().map(|x| x + x + x + x).collect::<Box<_>>();
@@ -210,21 +210,21 @@ mod tests {
 
         let data: Arc<[f32]> = (0..C * T).map(|x| x as f32).collect();
 
-        let a = Tensor::create(cpu.clone(), [C, T], data.clone())?.cast::<F32x4>([C / 4, T])?;
-        let b = Tensor::create(cpu.clone(), [C, T], data.clone())?.cast::<F32x4>([C / 4, T])?;
+        let a = Tensor::create(cpu.clone(), [C, T], data.clone()).cast::<F32x4>([C / 4, T]);
+        let b = Tensor::create(cpu.clone(), [C, T], data.clone()).cast::<F32x4>([C / 4, T]);
         let b = a.clone() + b;
 
-        let c = Tensor::create(cpu.clone(), [C, T], data.clone())?.cast::<F32x4>([C / 4, T])?;
+        let c = Tensor::create(cpu.clone(), [C, T], data.clone()).cast::<F32x4>([C / 4, T]);
         let d = a + b.clone() + c;
 
         let r#ref = data.par_iter().map(|x| x + x + x + x).collect::<Box<_>>();
 
-        let output = d.cast::<f32>([C, T])?.back().await?;
+        let output = d.cast::<f32>([C, T]).back().await?;
         assert_eq!(output, r#ref);
 
         let d = b.clone() + b;
 
-        let output = d.cast::<f32>([C, T])?.back().await?;
+        let output = d.cast::<f32>([C, T]).back().await?;
         assert_eq!(output, r#ref);
 
         Ok(())

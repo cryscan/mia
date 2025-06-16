@@ -4,12 +4,7 @@ use casey::snake;
 use derive_more::{Deref, DerefMut, Display, From, Into};
 use itertools::Itertools;
 
-use super::{
-    device::Device,
-    layout::Layout,
-    num::Scalar,
-    tensor::{Tensor, TensorError},
-};
+use super::{device::Device, layout::Layout, num::Scalar, tensor::Tensor};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Display)]
 pub enum Axis {
@@ -107,23 +102,31 @@ impl<D: Device, T: Scalar> TensorSlice<D, T> {
 
 impl<D: Device, T: Scalar> Tensor<D, T> {
     /// Create a [`TensorSlice`] from the tensor.
+    ///
+    /// # Panics
+    /// This method will panic if the slice length does not match the tensor layout length,
+    /// or if the slice contains out-of-bounds indices.
     #[inline]
-    pub fn slice(self, slice: Slice) -> Result<TensorSlice<D, T>, TensorError> {
-        if slice.len() != self.layout().len() {
-            return Err(TensorError::Slice(self.layout(), slice));
-        }
-        if slice
-            .iter()
-            .zip_eq(self.layout().shape().iter())
-            .filter_map(|(&axis, &shape)| match axis {
-                Axis::Full => None,
-                Axis::One(index) => Some((index, shape)),
-            })
-            .any(|(index, shape)| index >= shape)
-        {
-            return Err(TensorError::Slice(self.layout(), slice));
-        }
+    pub fn slice(self, slice: Slice) -> TensorSlice<D, T> {
+        let layout = self.layout();
+        let shape = layout.shape();
+        assert_eq!(
+            layout.len(),
+            slice.len(),
+            "slice length must match tensor layout length"
+        );
+        assert!(
+            itertools::izip!(slice.iter(), shape.iter())
+                .filter_map(|(&axis, &shape)| match axis {
+                    Axis::Full => None,
+                    Axis::One(index) => Some((index, shape)),
+                })
+                .all(|(index, shape)| index < shape),
+            "slice contains out-of-bounds indices: {:?} for shape {:?}",
+            slice,
+            shape
+        );
         let tensor = self;
-        Ok(TensorSlice { tensor, slice })
+        TensorSlice { tensor, slice }
     }
 }
