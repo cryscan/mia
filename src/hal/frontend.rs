@@ -3,16 +3,13 @@ use std::{marker::PhantomData, sync::Arc};
 use half::f16;
 use itertools::Itertools;
 
-use super::ops::{AddOp, CreateOp};
-use crate::{
-    hal::ops::SoftmaxOp,
-    loom::{
-        device::{Device, DeviceError, DeviceEvent},
-        layout::IntoLayout,
-        num::{Float, Scalar},
-        ops::{Access, InnerOp, OneOp, TensorOp},
-        tensor::Tensor,
-    },
+use super::ops::{AddOp, CreateOp, LayerNormOp, SoftmaxOp};
+use crate::loom::{
+    device::{Device, DeviceError, DeviceEvent},
+    layout::IntoLayout,
+    num::{Float, Scalar},
+    ops::{Access, InnerOp, OneOp, TensorOp},
+    tensor::Tensor,
 };
 
 fn binary_op_unchecked<D, T, Op>(lhs: Tensor<D, T>, rhs: Tensor<D, T>) -> Tensor<D, T>
@@ -110,7 +107,27 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
     }
 
     #[inline]
-    pub fn layer_norm(self, _w: Tensor<D, f16>, _b: Tensor<D, f16>) -> Self {
-        todo!()
+    pub fn layer_norm(self, w: Tensor<D, f16>, b: Tensor<D, f16>, eps: f32) -> Self {
+        let layout = self.layout();
+        let shape = [layout.shape_of(0)].into();
+        assert_eq!(w.layout().shape(), shape, "weight must match input shape");
+        assert_eq!(b.layout().shape(), shape, "bias must match input shape");
+
+        let mut output = Tensor::<D, T>::zeros_like(&self);
+        let mut ops = self.tape().ops.clone();
+
+        let phantom = PhantomData;
+        let inputs = [
+            self.ir(Access::ReadOnly),
+            w.ir(Access::ReadOnly),
+            b.ir(Access::ReadOnly),
+        ];
+        let outputs = [output.ir(Access::WriteOnly)];
+        let op = InnerOp::new(inputs, outputs);
+        let op = LayerNormOp::<T> { op, phantom, eps };
+        ops.push(Box::new(op));
+
+        output.replace_ops(ops);
+        output
     }
 }
