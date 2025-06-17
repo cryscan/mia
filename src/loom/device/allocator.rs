@@ -167,6 +167,26 @@ impl Allocator {
             .values_mut()
             .for_each(|v| v.retain(|id| ids.contains(id)));
     }
+
+    pub fn print_pretty(&mut self) -> String {
+        let ids: HashSet<_> = self
+            .alloc
+            .keys()
+            .chain(self.alloc.values())
+            .copied()
+            .collect();
+        ids.into_iter()
+            .map(|id| {
+                let dest = self.redirect(id);
+                let stash = self
+                    .stash
+                    .get(&dest)
+                    .copied()
+                    .map_or(Default::default(), |id| id.to_string());
+                format!("{id}\t→ {dest}\t: {stash}")
+            })
+            .join("\n")
+    }
 }
 
 /// A wrapper around another [`TensorOp`], of which storages are optimized by the allocator.

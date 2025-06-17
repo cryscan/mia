@@ -156,18 +156,19 @@ impl BackendOp<Backend> for LayerNormOp<f32> {
                             (mean, m2, count)
                         },
                     );
-                    let variance = m2 / count as f32 + eps;
-                    let deviation = 1.0 / variance.sqrt();
+                    let var = m2 / count as f32 + eps;
+                    let std = 1.0 / var.sqrt();
 
                     let mean = f16::from_f32(mean);
-                    let deviation = f16::from_f32(deviation);
+                    let std = f16::from_f32(std);
                     lo.iter_indices().map(move |(_, lo)| {
                         let x = f16::from_f32(x[lo + hi]);
                         let w = w[lo];
                         let b = b[lo];
-                        (x - mean) * deviation * w + b
+                        (x - mean) * std * w + b
                     })
                 })
+                .map(f16::to_f32)
                 .collect()
         })
         .await;
@@ -204,16 +205,19 @@ impl BackendOp<Backend> for LayerNormOp<f32> {
                                 };
                                 let m2 = match count {
                                     0 => 0.0,
-                                    _ => m2_1 + m2_2 + delta * delta * (count_1 * count_2),
+                                    _ => {
+                                        let count = count as f32;
+                                        m2_1 + m2_2 + delta.powi(2) * (count_1 * count_2) / count
+                                    }
                                 };
                                 (mean, m2, count)
                             },
                         );
-                    let variance = m2 / count as f32 + eps;
-                    let deviation = 1.0 / variance.sqrt();
+                    let var = m2 / count as f32 + eps;
+                    let std = 1.0 / var.sqrt();
 
                     let mean = f16::from_f32(mean);
-                    let deviation = f16::from_f32(deviation);
+                    let std = f16::from_f32(std);
 
                     let x = x.clone();
                     let w = w.clone();
@@ -226,9 +230,10 @@ impl BackendOp<Backend> for LayerNormOp<f32> {
                         let x = f16::from_f32(x[lo + hi]);
                         let w = w[lo];
                         let b = b[lo];
-                        (x - mean) * deviation * w + b
+                        (x - mean) * std * w + b
                     })
                 })
+                .map(f16::to_f32)
                 .collect()
         })
         .await;
@@ -265,16 +270,16 @@ impl BackendOp<Backend> for LayerNormOp<f16> {
                             let m2 = m2 + delta * (x - mean);
                             (mean, m2, count)
                         });
-                    let variance = m2 / count as f32 + eps;
-                    let deviation = 1.0 / variance.sqrt();
+                    let var = m2 / count as f32 + eps;
+                    let std = 1.0 / var.sqrt();
 
                     let mean = f16::from_f32(mean);
-                    let deviation = f16::from_f32(deviation);
+                    let std = f16::from_f32(std);
                     lo.iter_indices().map(move |(_, lo)| {
                         let x = x[lo + hi];
                         let w = w[lo];
                         let b = b[lo];
-                        (x - mean) * deviation * w + b
+                        (x - mean) * std * w + b
                     })
                 })
                 .collect()
@@ -314,16 +319,19 @@ impl BackendOp<Backend> for LayerNormOp<f16> {
                                 };
                                 let m2 = match count {
                                     0 => 0.0,
-                                    _ => m2_1 + m2_2 + delta * delta * (count_1 * count_2),
+                                    _ => {
+                                        let count = count as f32;
+                                        m2_1 + m2_2 + delta.powi(2) * (count_1 * count_2) / count
+                                    }
                                 };
                                 (mean, m2, count)
                             },
                         );
-                    let variance = m2 / count as f32 + eps;
-                    let deviation = 1.0 / variance.sqrt();
+                    let var = m2 / count as f32 + eps;
+                    let std = 1.0 / var.sqrt();
 
                     let mean = f16::from_f32(mean);
-                    let deviation = f16::from_f32(deviation);
+                    let std = f16::from_f32(std);
 
                     let x = x.clone();
                     let w = w.clone();
@@ -336,7 +344,7 @@ impl BackendOp<Backend> for LayerNormOp<f16> {
                         let x = x[lo + hi];
                         let w = w[lo];
                         let b = b[lo];
-                        (x - mean) * deviation * w + b
+                        (x - mean) * std * w + b
                     })
                 })
                 .collect()
@@ -480,6 +488,103 @@ mod tests {
                 .map(move |v| v / exp_sum)
                 .collect()
         };
+
+        for (index, (&a, &b)) in output.iter().zip(r#ref.iter()).enumerate() {
+            assert_approx_eq!(index, a, b, 1e-2);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_layer_norm_f16() -> Result<(), Box<dyn Error>> {
+        fastrand::seed(42);
+
+        let cpu = CpuBuilder::new().add_default_ops().build().await;
+        const N: usize = 64;
+        const C: usize = 128;
+
+        let x_data: Arc<_> = (0..N * C).map(|_| f16::from_f32(fastrand::f32())).collect();
+        let x = Tensor::create(cpu.clone(), [C, N], x_data.clone());
+
+        let w_data: Arc<_> = (0..C).map(|_| f16::from_f32(fastrand::f32())).collect();
+        let b_data: Arc<_> = (0..C).map(|_| f16::from_f32(fastrand::f32())).collect();
+
+        let w = Tensor::create(cpu.clone(), [C], w_data.clone());
+        let b = Tensor::create(cpu.clone(), [C], b_data.clone());
+
+        let y = x.layer_norm(w, b, 1e-5);
+        let output = y.back().await?;
+
+        let mut r#ref = Vec::with_capacity(N * C);
+        for i in 0..N {
+            let start = i * C;
+            let chunk = &x_data[start..start + C];
+
+            let mean: f32 = chunk.iter().copied().map(f16::to_f32).sum::<f32>() / C as f32;
+
+            let var: f32 = chunk
+                .iter()
+                .copied()
+                .map(f16::to_f32)
+                .map(|x| (x - mean).powi(2))
+                .sum::<f32>()
+                / C as f32;
+            let std = (var + 1e-5).sqrt();
+
+            let mean = f16::from_f32(mean);
+            let std = f16::from_f32(std);
+            for j in 0..C {
+                let norm = (chunk[j] - mean) / std;
+                r#ref.push(norm * w_data[j] + b_data[j]);
+            }
+        }
+
+        for (index, (&a, &b)) in output.iter().zip(r#ref.iter()).enumerate() {
+            assert_approx_eq!(index, f16::to_f32(a), f16::to_f32(b), 1e-2);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_layer_norm_f32() -> Result<(), Box<dyn Error>> {
+        fastrand::seed(42);
+
+        let cpu = CpuBuilder::new().add_default_ops().build().await;
+        const N: usize = 64;
+        const C: usize = 128;
+        const EPS: f32 = 1.0e-5;
+
+        let x_data: Arc<_> = (0..N * C).map(|_| fastrand::f32()).collect();
+        let x = Tensor::create(cpu.clone(), [C, N], x_data.clone());
+
+        let w_data: Arc<_> = (0..C).map(|_| f16::from_f32(fastrand::f32())).collect();
+        let b_data: Arc<_> = (0..C).map(|_| f16::from_f32(fastrand::f32())).collect();
+
+        let w = Tensor::create(cpu.clone(), [C], w_data.clone());
+        let b = Tensor::create(cpu.clone(), [C], b_data.clone());
+
+        let y = x.layer_norm(w, b, EPS);
+        let output = y.back().await?;
+
+        let mut r#ref = Vec::with_capacity(N * C);
+        for i in 0..N {
+            let start = i * C;
+            let chunk = &x_data[start..start + C];
+
+            let mean: f32 = chunk.iter().sum::<f32>() / C as f32;
+            let var: f32 = chunk.iter().map(|&x| (x - mean).powi(2)).sum::<f32>() / C as f32;
+            let std = (var + EPS).sqrt();
+
+            let mean = f16::from_f32(mean);
+            let std = f16::from_f32(std);
+
+            for j in 0..C {
+                let norm = (f16::from_f32(chunk[j]) - mean) / std;
+                r#ref.push(f16::to_f32(norm * w_data[j] + b_data[j]));
+            }
+        }
 
         for (index, (&a, &b)) in output.iter().zip(r#ref.iter()).enumerate() {
             assert_approx_eq!(index, a, b, 1e-2);

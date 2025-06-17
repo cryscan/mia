@@ -200,10 +200,13 @@ impl super::Backend for Backend {
     #[inline]
     fn fetch(&self, id: TensorId) -> Self::Data {
         let id = self.allocator().retrieve(id);
-        self.buffers
-            .get(&id)
-            .expect("failed to fetch buffer")
-            .clone()
+        match self.buffers.get(&id) {
+            Some(data) => data.clone(),
+            None => {
+                let status = self.allocator().print_pretty();
+                panic!("{}", format!("failed to fetch buffer: {id}\n\n{status}\n"))
+            }
+        }
     }
 }
 

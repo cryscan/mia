@@ -114,7 +114,15 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
         assert_eq!(b.layout().shape(), shape, "bias must match input shape");
 
         let mut output = Tensor::<D, T>::zeros_like(&self);
-        let mut ops = self.tape().ops.clone();
+        let mut ops = [
+            self.tape().ops.clone(),
+            w.tape().ops.clone(),
+            b.tape().ops.clone(),
+        ]
+        .concat()
+        .into_iter()
+        .unique()
+        .collect_vec();
 
         let phantom = PhantomData;
         let inputs = [
@@ -124,7 +132,7 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
         ];
         let outputs = [output.ir(Access::WriteOnly)];
         let op = InnerOp::new(inputs, outputs);
-        let op = LayerNormOp::<T> { op, phantom, eps };
+        let op = LayerNormOp::<T> { op, eps, phantom };
         ops.push(Box::new(op));
 
         output.replace_ops(ops);
