@@ -12,22 +12,82 @@ use crate::loom::{
     tensor::Tensor,
 };
 
-fn binary_op_unchecked<D, T, Op>(lhs: Tensor<D, T>, rhs: Tensor<D, T>) -> Tensor<D, T>
+fn build_api_1<D, U, Op, F>(t: Tensor<D, impl Scalar>, f: F) -> Tensor<D, U>
 where
     D: Device + Clone,
-    T: Scalar,
-    Op: From<InnerOp<2, 1>> + TensorOp,
+    U: Scalar,
+    Op: TensorOp,
+    F: FnOnce(InnerOp<1, 1>) -> Op,
 {
-    let mut output = Tensor::zeros_like(&lhs);
-    let mut ops = [lhs.tape().ops.clone(), rhs.tape().ops.clone()]
+    let mut output = Tensor::zeros_like(&t);
+    let mut ops = t.tape().ops.clone();
+
+    let inputs = [t.ir(Access::ReadOnly)];
+    let outputs = [output.ir(Access::WriteOnly)];
+    let op = f(InnerOp::new(inputs, outputs));
+    ops.push(Box::new(op));
+    output.replace_ops(ops);
+
+    output
+}
+
+fn build_api_2<D, U, Op, F>(
+    t0: Tensor<D, impl Scalar>,
+    t1: Tensor<D, impl Scalar>,
+    f: F,
+) -> Tensor<D, U>
+where
+    D: Device + Clone,
+    U: Scalar,
+    Op: TensorOp,
+    F: FnOnce(InnerOp<2, 1>) -> Op,
+{
+    let mut output = Tensor::zeros_like(&t0);
+    let mut ops = [t0.tape().ops.clone(), t1.tape().ops.clone()]
         .concat()
         .into_iter()
         .unique()
         .collect_vec();
 
-    let inputs = [lhs.ir(Access::ReadOnly), rhs.ir(Access::ReadOnly)];
+    let inputs = [t0.ir(Access::ReadOnly), t1.ir(Access::ReadOnly)];
     let outputs = [output.ir(Access::WriteOnly)];
-    let op = Op::from(InnerOp::new(inputs, outputs));
+    let op = f(InnerOp::new(inputs, outputs));
+    ops.push(Box::new(op));
+    output.replace_ops(ops);
+
+    output
+}
+
+fn build_api_3<D, U, Op, F>(
+    t0: Tensor<D, impl Scalar>,
+    t1: Tensor<D, impl Scalar>,
+    t2: Tensor<D, impl Scalar>,
+    f: F,
+) -> Tensor<D, U>
+where
+    D: Device + Clone,
+    U: Scalar,
+    Op: TensorOp,
+    F: FnOnce(InnerOp<3, 1>) -> Op,
+{
+    let mut output = Tensor::zeros_like(&t0);
+    let mut ops = [
+        t0.tape().ops.clone(),
+        t1.tape().ops.clone(),
+        t2.tape().ops.clone(),
+    ]
+    .concat()
+    .into_iter()
+    .unique()
+    .collect_vec();
+
+    let inputs = [
+        t0.ir(Access::ReadOnly),
+        t1.ir(Access::ReadOnly),
+        t2.ir(Access::ReadOnly),
+    ];
+    let outputs = [output.ir(Access::WriteOnly)];
+    let op = f(InnerOp::new(inputs, outputs));
     ops.push(Box::new(op));
     output.replace_ops(ops);
 
@@ -87,23 +147,16 @@ impl<D: Device + Clone, T: Scalar> std::ops::Add<Tensor<D, T>> for Tensor<D, T> 
 
     fn add(self, rhs: Tensor<D, T>) -> Self::Output {
         assert_eq!(self.layout(), rhs.layout(), "tensor layouts must match");
-        binary_op_unchecked::<_, _, AddOp<T>>(self, rhs)
+        let phantom = PhantomData;
+        build_api_2(self, rhs, move |op| AddOp::<T> { op, phantom })
     }
 }
 
 impl<D: Device + Clone, T: Float> Tensor<D, T> {
     #[inline]
     pub fn softmax(self) -> Self {
-        let mut output = Tensor::<D, T>::zeros_like(&self);
-        let mut ops = self.tape().ops.clone();
-
         let phantom = PhantomData;
-        let op = InnerOp::new([self.ir(Access::ReadOnly)], [output.ir(Access::WriteOnly)]);
-        let op = SoftmaxOp::<T> { op, phantom };
-        ops.push(Box::new(op));
-
-        output.replace_ops(ops);
-        output
+        build_api_1(self, move |op| SoftmaxOp::<T> { op, phantom })
     }
 
     #[inline]
@@ -113,29 +166,7 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
         assert_eq!(w.layout().shape(), shape, "weight must match input shape");
         assert_eq!(b.layout().shape(), shape, "bias must match input shape");
 
-        let mut output = Tensor::<D, T>::zeros_like(&self);
-        let mut ops = [
-            self.tape().ops.clone(),
-            w.tape().ops.clone(),
-            b.tape().ops.clone(),
-        ]
-        .concat()
-        .into_iter()
-        .unique()
-        .collect_vec();
-
         let phantom = PhantomData;
-        let inputs = [
-            self.ir(Access::ReadOnly),
-            w.ir(Access::ReadOnly),
-            b.ir(Access::ReadOnly),
-        ];
-        let outputs = [output.ir(Access::WriteOnly)];
-        let op = InnerOp::new(inputs, outputs);
-        let op = LayerNormOp::<T> { op, eps, phantom };
-        ops.push(Box::new(op));
-
-        output.replace_ops(ops);
-        output
+        build_api_3(self, w, b, move |op| LayerNormOp::<T> { op, eps, phantom })
     }
 }

@@ -165,16 +165,16 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
 
     /// Create a tensor of zeros from current device and layout.
     #[inline]
-    pub fn zeros_like(&self) -> Self {
+    pub fn zeros_like<U: Scalar>(&self) -> Tensor<D, U> {
         let device = self.device.clone();
         let layout = self.layout();
-        let size = self.buffer_size();
         let id = TensorId(uuid::Uuid::new_v4());
-        let ir = unsafe { TensorIr::unique::<T>(id, layout.clone(), Access::WriteOnly) };
+        let size = layout.co_size() * size_of::<U>();
+        let ir = unsafe { TensorIr::unique::<U>(id, layout.clone(), Access::WriteOnly) };
         let ops: Vec<Box<dyn TensorOp>> = vec![Box::new(ZeroOp::new(ir))];
         let tape = Arc::new(TensorTape { id, ops });
         let phantom = PhantomData;
-        Self {
+        Tensor {
             device,
             layout,
             id,
