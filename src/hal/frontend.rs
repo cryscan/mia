@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, sync::Arc};
 
 use half::f16;
-use itertools::Itertools;
+use mia_derive::build_api;
 
 use super::ops::{AddOp, CreateOp, LayerNormOp, SoftmaxOp};
 use crate::loom::{
@@ -12,87 +12,9 @@ use crate::loom::{
     tensor::Tensor,
 };
 
-fn build_api_1<D, U, Op, F>(t: Tensor<D, impl Scalar>, f: F) -> Tensor<D, U>
-where
-    D: Device + Clone,
-    U: Scalar,
-    Op: TensorOp,
-    F: FnOnce(InnerOp<1, 1>) -> Op,
-{
-    let mut output = Tensor::zeros_like(&t);
-    let mut ops = t.tape().ops.clone();
-
-    let inputs = [t.ir(Access::ReadOnly)];
-    let outputs = [output.ir(Access::WriteOnly)];
-    let op = f(InnerOp::new(inputs, outputs));
-    ops.push(Box::new(op));
-    output.replace_ops(ops);
-
-    output
-}
-
-fn build_api_2<D, U, Op, F>(
-    t0: Tensor<D, impl Scalar>,
-    t1: Tensor<D, impl Scalar>,
-    f: F,
-) -> Tensor<D, U>
-where
-    D: Device + Clone,
-    U: Scalar,
-    Op: TensorOp,
-    F: FnOnce(InnerOp<2, 1>) -> Op,
-{
-    let mut output = Tensor::zeros_like(&t0);
-    let mut ops = [t0.tape().ops.clone(), t1.tape().ops.clone()]
-        .concat()
-        .into_iter()
-        .unique()
-        .collect_vec();
-
-    let inputs = [t0.ir(Access::ReadOnly), t1.ir(Access::ReadOnly)];
-    let outputs = [output.ir(Access::WriteOnly)];
-    let op = f(InnerOp::new(inputs, outputs));
-    ops.push(Box::new(op));
-    output.replace_ops(ops);
-
-    output
-}
-
-fn build_api_3<D, U, Op, F>(
-    t0: Tensor<D, impl Scalar>,
-    t1: Tensor<D, impl Scalar>,
-    t2: Tensor<D, impl Scalar>,
-    f: F,
-) -> Tensor<D, U>
-where
-    D: Device + Clone,
-    U: Scalar,
-    Op: TensorOp,
-    F: FnOnce(InnerOp<3, 1>) -> Op,
-{
-    let mut output = Tensor::zeros_like(&t0);
-    let mut ops = [
-        t0.tape().ops.clone(),
-        t1.tape().ops.clone(),
-        t2.tape().ops.clone(),
-    ]
-    .concat()
-    .into_iter()
-    .unique()
-    .collect_vec();
-
-    let inputs = [
-        t0.ir(Access::ReadOnly),
-        t1.ir(Access::ReadOnly),
-        t2.ir(Access::ReadOnly),
-    ];
-    let outputs = [output.ir(Access::WriteOnly)];
-    let op = f(InnerOp::new(inputs, outputs));
-    ops.push(Box::new(op));
-    output.replace_ops(ops);
-
-    output
-}
+build_api!(1);
+build_api!(2);
+build_api!(3);
 
 impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
     /// Replace the inner ops recorded on the tape of the tensor.
@@ -148,7 +70,7 @@ impl<D: Device + Clone, T: Scalar> std::ops::Add<Tensor<D, T>> for Tensor<D, T> 
     fn add(self, rhs: Tensor<D, T>) -> Self::Output {
         assert_eq!(self.layout(), rhs.layout(), "tensor layouts must match");
         let phantom = PhantomData;
-        build_api_2(self, rhs, move |op| AddOp::<T> { op, phantom })
+        build_api_2(move |op| AddOp::<T> { op, phantom }, self, rhs)
     }
 }
 
@@ -156,7 +78,7 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
     #[inline]
     pub fn softmax(self) -> Self {
         let phantom = PhantomData;
-        build_api_1(self, move |op| SoftmaxOp::<T> { op, phantom })
+        build_api_1(move |op| SoftmaxOp::<T> { op, phantom }, self)
     }
 
     #[inline]
@@ -167,6 +89,6 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
         assert_eq!(b.layout().shape(), shape, "bias must match input shape");
 
         let phantom = PhantomData;
-        build_api_3(self, w, b, move |op| LayerNormOp::<T> { op, eps, phantom })
+        build_api_3(move |op| LayerNormOp::<T> { op, eps, phantom }, self, w, b)
     }
 }
