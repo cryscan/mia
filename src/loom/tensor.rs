@@ -70,7 +70,7 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
 
     /// Returns the element count of the tensor.
     #[inline]
-    pub fn data_count(&self) -> usize {
+    pub fn data_len(&self) -> usize {
         self.layout.co_size() * T::DATA_TYPE.count()
     }
 

@@ -57,7 +57,7 @@ impl TensorIr {
     }
 
     #[inline]
-    pub fn data_count(&self) -> usize {
+    pub fn data_len(&self) -> usize {
         self.layout.size() * self.r#type.count()
     }
 
@@ -68,7 +68,7 @@ impl TensorIr {
 
     #[inline]
     pub fn is_compatible(&self, other: &TensorIr) -> bool {
-        self.r#type == other.r#type && self.data_count() == other.data_count()
+        self.r#type == other.r#type && self.data_len() == other.data_len()
     }
 }
 

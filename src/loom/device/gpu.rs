@@ -81,9 +81,9 @@ impl super::Backend for Backend {
     }
 
     #[inline]
-    fn alloc<T: Scalar>(&mut self, id: TensorId, count: usize) -> Self::Data {
+    fn alloc<T: Scalar>(&mut self, id: TensorId, len: usize) -> Self::Data {
         let id = self.allocator().retrieve(id);
-        let size = size_of::<T>() * count;
+        let size = size_of::<T>() * len;
         let data = self
             .buffers
             .get(&id)

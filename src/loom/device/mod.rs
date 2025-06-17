@@ -67,7 +67,7 @@ pub trait Backend {
         T: Scalar,
         C: Into<Cow<'a, [T]>>;
     /// Allocate a buffer for tensor of `id`.
-    fn alloc<T: Scalar>(&mut self, id: TensorId, count: usize) -> Self::Data;
+    fn alloc<T: Scalar>(&mut self, id: TensorId, len: usize) -> Self::Data;
     /// Get the buffer of tensor of `id`.
     fn fetch(&self, id: TensorId) -> Self::Data;
 }

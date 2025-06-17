@@ -71,7 +71,7 @@ impl BackendOp<Backend> for SoftmaxOp<f16> {
         let layout = io[0].layout.clone();
         let x = backend.fetch(io[0].id);
 
-        // #[cfg(not(feature = "rayon"))]
+        #[cfg(not(feature = "rayon"))]
         let output: Vec<_> = handle(move || {
             let (lo, hi) = layout.split_at(1);
             hi.iter_indices()
@@ -96,34 +96,34 @@ impl BackendOp<Backend> for SoftmaxOp<f16> {
                 .collect()
         })
         .await;
-        // #[cfg(feature = "rayon")]
-        // let output: Vec<_> = handle(move || {
-        //     use rayon::prelude::*;
+        #[cfg(feature = "rayon")]
+        let output: Vec<_> = handle(move || {
+            use rayon::prelude::*;
 
-        //     let (lo, hi) = layout.split_at(1);
-        //     hi.par_iter_indices()
-        //         .flat_map(|(_, hi)| {
-        //             let max = lo
-        //                 .par_iter_indices()
-        //                 .map(|(_, lo)| x.read_slice::<f16>()[lo + hi])
-        //                 .reduce(|| f16::NEG_INFINITY, f16::max);
-        //             let exp_sum: f32 = lo
-        //                 .par_iter_indices()
-        //                 .map(|(_, lo)| x.read_slice::<f16>()[lo + hi] - max)
-        //                 .map(f16::to_f32)
-        //                 .map(f32::exp)
-        //                 .sum();
+            let (lo, hi) = layout.split_at(1);
+            hi.par_iter_indices()
+                .flat_map(|(_, hi)| {
+                    let max = lo
+                        .par_iter_indices()
+                        .map(|(_, lo)| x.read_slice::<f16>()[lo + hi])
+                        .reduce(|| f16::NEG_INFINITY, f16::max);
+                    let exp_sum: f32 = lo
+                        .par_iter_indices()
+                        .map(|(_, lo)| x.read_slice::<f16>()[lo + hi] - max)
+                        .map(f16::to_f32)
+                        .map(f32::exp)
+                        .sum();
 
-        //             let x = x.clone();
-        //             lo.par_iter_indices()
-        //                 .map(move |(_, lo)| x.read_slice::<f16>()[lo + hi] - max)
-        //                 .map(f16::to_f32)
-        //                 .map(move |x| x / exp_sum)
-        //                 .map(f16::from_f32)
-        //         })
-        //         .collect()
-        // })
-        // .await;
+                    let x = x.clone();
+                    lo.par_iter_indices()
+                        .map(move |(_, lo)| x.read_slice::<f16>()[lo + hi] - max)
+                        .map(f16::to_f32)
+                        .map(move |x| x / exp_sum)
+                        .map(f16::from_f32)
+                })
+                .collect()
+        })
+        .await;
 
         backend.create(io[1].id, output);
     }
@@ -387,7 +387,12 @@ mod tests {
             .chunks_exact(T)
             .flat_map(|x| {
                 let max = x.iter().copied().fold(f16::NEG_INFINITY, f16::max);
-                let exp_sum: f32 = x.iter().map(|&v| f16::to_f32(v - max).exp()).sum();
+                let exp_sum: f32 = x
+                    .iter()
+                    .map(|v| v - max)
+                    .map(f16::to_f32)
+                    .map(f32::exp)
+                    .sum();
                 x.iter()
                     .map(|v| v - max)
                     .map(f16::to_f32)
@@ -409,7 +414,12 @@ mod tests {
         let output = a.back().await?;
         let r#ref: Box<_> = {
             let max = data.iter().copied().fold(f16::NEG_INFINITY, f16::max);
-            let exp_sum: f32 = data.iter().map(|&v| f16::to_f32(v - max).exp()).sum();
+            let exp_sum: f32 = data
+                .iter()
+                .map(|v| v - max)
+                .map(f16::to_f32)
+                .map(f32::exp)
+                .sum();
             data.iter()
                 .map(|v| v - max)
                 .map(f16::to_f32)
@@ -443,7 +453,7 @@ mod tests {
             .chunks_exact(T)
             .flat_map(|x| {
                 let max = x.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-                let exp_sum: f32 = x.iter().map(|&v| (v - max).exp()).sum();
+                let exp_sum: f32 = x.iter().map(|v| v - max).map(f32::exp).sum();
                 x.iter()
                     .map(|v| v - max)
                     .map(f32::exp)
@@ -463,7 +473,7 @@ mod tests {
         let output = a.back().await?;
         let r#ref: Box<_> = {
             let max = data.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-            let exp_sum: f32 = data.iter().map(|&v| (v - max).exp()).sum();
+            let exp_sum: f32 = data.iter().map(|v| v - max).map(f32::exp).sum();
             data.iter()
                 .map(|v| v - max)
                 .map(f32::exp)

@@ -181,17 +181,17 @@ impl super::Backend for Backend {
     }
 
     #[inline]
-    fn alloc<T: Scalar>(&mut self, id: TensorId, count: usize) -> Self::Data {
+    fn alloc<T: Scalar>(&mut self, id: TensorId, len: usize) -> Self::Data {
         let id = self.allocator().retrieve(id);
         let data = self
             .buffers
             .get(&id)
             .cloned()
             .filter(|data| data.align() == align_of::<T>())
-            .filter(|data| data.read_slice::<T>().len() == count);
+            .filter(|data| data.read_slice::<T>().len() == len);
         let data = match data {
             Some(data) => data,
-            None => vec![T::zero(); count].into(),
+            None => vec![T::zero(); len].into(),
         };
         self.buffers.insert(id, data.clone());
         data
