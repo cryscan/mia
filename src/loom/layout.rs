@@ -359,7 +359,9 @@ impl Layout {
     }
 
     /// Creates a layout from shape and stride.
-    /// **Panics** if lengths of the shape and the stride don't match.
+    ///
+    /// ## Panics
+    /// The method panics if lengths of the shape and the stride don't match.
     #[inline]
     pub fn from_shape_stride(shape: impl Into<Shape>, stride: impl Into<Stride>) -> Self {
         let shape: Shape = shape.into();
@@ -455,6 +457,12 @@ impl Layout {
             })
             .0
             .into()
+    }
+
+    /// Returns an iterator over indices and their values.
+    #[inline]
+    pub fn iter_indices(&self) -> impl Iterator<Item = (usize, usize)> {
+        (0..self.size()).map(|index| (index, self.value(index)))
     }
 
     /// Returns `true` if two layouts are totally equal as index mappings.
@@ -569,8 +577,18 @@ impl Layout {
 
     /// Stack another layout onto `self`.
     #[inline]
-    fn concat(&self, other: impl AsRef<Self>) -> Self {
+    pub fn concat(&self, other: impl AsRef<Self>) -> Self {
         Self::from([&self[..], &other.as_ref()[..]].concat())
+    }
+
+    /// Splits the layout at a given index.
+    ///
+    /// ## Panics
+    /// This method will panic if `mid > len`.
+    #[inline]
+    pub fn split_at(&self, mid: usize) -> (Self, Self) {
+        let (left, right) = self.0.split_at(mid);
+        (Self::from(left.to_vec()), Self::from(right.to_vec()))
     }
 
     /// Make a tiler from this layout.
@@ -611,6 +629,15 @@ impl Layout {
         let tile = tile.as_ref();
         let size = self.size() * tile.full_size();
         Ok(self.concat(tile.compose(self.complement(size)?)?))
+    }
+
+    /// Shortcut for calling [`Self::prod`] on `self.tiler(tile)`.
+    #[inline]
+    pub fn prod_tiler(
+        &self,
+        tile: impl IntoIterator<Item = (usize, usize)>,
+    ) -> Result<Self, LayoutError> {
+        self.prod(self.tiler(tile))
     }
 }
 
