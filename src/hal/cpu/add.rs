@@ -19,7 +19,7 @@ impl BackendOp<Backend> for AddOp<f32> {
         let y = backend.fetch(io[1].id);
 
         #[cfg(not(feature = "rayon"))]
-        let output: Box<_> = handle(move || {
+        let output: Vec<_> = handle(move || {
             let x = x.read_slice::<f32>();
             let y = y.read_slice::<f32>();
 
@@ -30,7 +30,7 @@ impl BackendOp<Backend> for AddOp<f32> {
         })
         .await;
         #[cfg(feature = "rayon")]
-        let output: Box<_> = handle(move || {
+        let output: Vec<_> = handle(move || {
             use rayon::prelude::*;
 
             let x = x.read_slice::<f32>();
@@ -43,8 +43,7 @@ impl BackendOp<Backend> for AddOp<f32> {
         })
         .await;
 
-        let output = output.into_iter().flat_map(|z| z.to_ne_bytes()).collect();
-        *backend.fetch(io[2].id).write() = output;
+        backend.create(io[2].id, output);
     }
 }
 
@@ -57,7 +56,7 @@ impl BackendOp<Backend> for AddOp<f16> {
         let y = backend.fetch(io[1].id);
 
         #[cfg(not(feature = "rayon"))]
-        let output: Box<_> = handle(move || {
+        let output: Vec<_> = handle(move || {
             let x = x.read_slice::<f16>();
             let y = y.read_slice::<f16>();
 
@@ -68,7 +67,7 @@ impl BackendOp<Backend> for AddOp<f16> {
         })
         .await;
         #[cfg(feature = "rayon")]
-        let output: Box<_> = handle(move || {
+        let output: Vec<_> = handle(move || {
             use rayon::prelude::*;
 
             let x = x.read_slice::<f16>();
@@ -81,8 +80,7 @@ impl BackendOp<Backend> for AddOp<f16> {
         })
         .await;
 
-        let output = output.into_iter().flat_map(|z| z.to_ne_bytes()).collect();
-        *backend.fetch(io[2].id).write() = output;
+        backend.create(io[2].id, output);
     }
 }
 
@@ -95,7 +93,7 @@ impl BackendOp<Backend> for AddOp<F32x4> {
         let y = backend.fetch(io[1].id);
 
         #[cfg(not(feature = "rayon"))]
-        let output: Box<_> = handle(move || {
+        let output: Vec<_> = handle(move || {
             let x = x.read_slice::<F32x4>();
             let y = y.read_slice::<F32x4>();
 
@@ -106,7 +104,7 @@ impl BackendOp<Backend> for AddOp<F32x4> {
         })
         .await;
         #[cfg(feature = "rayon")]
-        let output: Box<_> = handle(move || {
+        let output: Vec<_> = handle(move || {
             use rayon::prelude::*;
 
             let x = x.read_slice::<F32x4>();
@@ -119,12 +117,7 @@ impl BackendOp<Backend> for AddOp<F32x4> {
         })
         .await;
 
-        let output = output
-            .into_iter()
-            .flat_map(|z| z.0)
-            .flat_map(|z| z.to_ne_bytes())
-            .collect();
-        *backend.fetch(io[2].id).write() = output;
+        backend.create(io[2].id, output);
     }
 }
 
@@ -137,7 +130,7 @@ impl BackendOp<Backend> for AddOp<F16x4> {
         let y = backend.fetch(io[1].id);
 
         #[cfg(not(feature = "rayon"))]
-        let output: Box<_> = handle(move || {
+        let output: Vec<_> = handle(move || {
             let x = x.read_slice::<F16x4>();
             let y = y.read_slice::<F16x4>();
 
@@ -148,7 +141,7 @@ impl BackendOp<Backend> for AddOp<F16x4> {
         })
         .await;
         #[cfg(feature = "rayon")]
-        let output: Box<_> = handle(move || {
+        let output: Vec<_> = handle(move || {
             use rayon::prelude::*;
 
             let x = x.read_slice::<F16x4>();
@@ -161,12 +154,7 @@ impl BackendOp<Backend> for AddOp<F16x4> {
         })
         .await;
 
-        let output = output
-            .into_iter()
-            .flat_map(|z| z.0)
-            .flat_map(|z| z.to_ne_bytes())
-            .collect();
-        *backend.fetch(io[2].id).write() = output;
+        backend.create(io[2].id, output);
     }
 }
 

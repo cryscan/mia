@@ -15,7 +15,7 @@ impl BackendOp<Backend> for SoftmaxOp<f32> {
         let x = backend.fetch(io[0].id);
 
         #[cfg(not(feature = "rayon"))]
-        let output: Box<_> = handle(move || {
+        let output: Vec<_> = handle(move || {
             let (lo, hi) = layout.split_at(1);
             hi.iter_indices()
                 .flat_map(|(_, hi)| {
@@ -37,7 +37,7 @@ impl BackendOp<Backend> for SoftmaxOp<f32> {
         })
         .await;
         #[cfg(feature = "rayon")]
-        let output: Box<_> = handle(move || {
+        let output: Vec<_> = handle(move || {
             use rayon::prelude::*;
 
             let (lo, hi) = layout.split_at(1);
@@ -62,8 +62,7 @@ impl BackendOp<Backend> for SoftmaxOp<f32> {
         })
         .await;
 
-        let output = output.into_iter().flat_map(|z| z.to_ne_bytes()).collect();
-        *backend.fetch(io[1].id).write() = output;
+        backend.create(io[1].id, output);
     }
 }
 
@@ -72,8 +71,8 @@ impl BackendOp<Backend> for SoftmaxOp<f16> {
         let layout = io[0].layout.clone();
         let x = backend.fetch(io[0].id);
 
-        #[cfg(not(feature = "rayon"))]
-        let output: Box<_> = handle(move || {
+        // #[cfg(not(feature = "rayon"))]
+        let output: Vec<_> = handle(move || {
             let (lo, hi) = layout.split_at(1);
             hi.iter_indices()
                 .flat_map(|(_, hi)| {
@@ -97,37 +96,36 @@ impl BackendOp<Backend> for SoftmaxOp<f16> {
                 .collect()
         })
         .await;
-        #[cfg(feature = "rayon")]
-        let output: Box<_> = handle(move || {
-            use rayon::prelude::*;
+        // #[cfg(feature = "rayon")]
+        // let output: Vec<_> = handle(move || {
+        //     use rayon::prelude::*;
 
-            let (lo, hi) = layout.split_at(1);
-            hi.par_iter_indices()
-                .flat_map(|(_, hi)| {
-                    let max = lo
-                        .par_iter_indices()
-                        .map(|(_, lo)| x.read_slice::<f16>()[lo + hi])
-                        .reduce(|| f16::NEG_INFINITY, f16::max);
-                    let exp_sum: f32 = lo
-                        .par_iter_indices()
-                        .map(|(_, lo)| x.read_slice::<f16>()[lo + hi] - max)
-                        .map(f16::to_f32)
-                        .map(f32::exp)
-                        .sum();
+        //     let (lo, hi) = layout.split_at(1);
+        //     hi.par_iter_indices()
+        //         .flat_map(|(_, hi)| {
+        //             let max = lo
+        //                 .par_iter_indices()
+        //                 .map(|(_, lo)| x.read_slice::<f16>()[lo + hi])
+        //                 .reduce(|| f16::NEG_INFINITY, f16::max);
+        //             let exp_sum: f32 = lo
+        //                 .par_iter_indices()
+        //                 .map(|(_, lo)| x.read_slice::<f16>()[lo + hi] - max)
+        //                 .map(f16::to_f32)
+        //                 .map(f32::exp)
+        //                 .sum();
 
-                    let x = x.clone();
-                    lo.par_iter_indices()
-                        .map(move |(_, lo)| x.read_slice::<f16>()[lo + hi] - max)
-                        .map(f16::to_f32)
-                        .map(move |x| x / exp_sum)
-                        .map(f16::from_f32)
-                })
-                .collect()
-        })
-        .await;
+        //             let x = x.clone();
+        //             lo.par_iter_indices()
+        //                 .map(move |(_, lo)| x.read_slice::<f16>()[lo + hi] - max)
+        //                 .map(f16::to_f32)
+        //                 .map(move |x| x / exp_sum)
+        //                 .map(f16::from_f32)
+        //         })
+        //         .collect()
+        // })
+        // .await;
 
-        let output = output.into_iter().flat_map(|z| z.to_ne_bytes()).collect();
-        *backend.fetch(io[1].id).write() = output;
+        backend.create(io[1].id, output);
     }
 }
 
@@ -140,7 +138,7 @@ impl BackendOp<Backend> for LayerNormOp<f32> {
         let b = backend.fetch(io[2].id);
 
         #[cfg(not(feature = "rayon"))]
-        let output: Box<_> = handle(move || {
+        let output: Vec<_> = handle(move || {
             let (lo, hi) = layout.split_at(1);
             hi.iter_indices()
                 .flat_map(|(_, hi)| {
@@ -174,7 +172,7 @@ impl BackendOp<Backend> for LayerNormOp<f32> {
         })
         .await;
         #[cfg(feature = "rayon")]
-        let output: Box<_> = handle(move || {
+        let output: Vec<_> = handle(move || {
             use rayon::prelude::*;
 
             let (lo, hi) = layout.split_at(1);
@@ -235,8 +233,7 @@ impl BackendOp<Backend> for LayerNormOp<f32> {
         })
         .await;
 
-        let output = output.into_iter().flat_map(|z| z.to_ne_bytes()).collect();
-        *backend.fetch(io[3].id).write() = output;
+        backend.create(io[3].id, output);
     }
 }
 
@@ -249,7 +246,7 @@ impl BackendOp<Backend> for LayerNormOp<f16> {
         let b = backend.fetch(io[2].id);
 
         #[cfg(not(feature = "rayon"))]
-        let output: Box<_> = handle(move || {
+        let output: Vec<_> = handle(move || {
             let (lo, hi) = layout.split_at(1);
             hi.iter_indices()
                 .flat_map(|(_, hi)| {
@@ -284,7 +281,7 @@ impl BackendOp<Backend> for LayerNormOp<f16> {
         })
         .await;
         #[cfg(feature = "rayon")]
-        let output: Box<_> = handle(move || {
+        let output: Vec<_> = handle(move || {
             use rayon::prelude::*;
 
             let (lo, hi) = layout.split_at(1);
@@ -346,8 +343,7 @@ impl BackendOp<Backend> for LayerNormOp<f16> {
         })
         .await;
 
-        let output = output.into_iter().flat_map(|z| z.to_ne_bytes()).collect();
-        *backend.fetch(io[3].id).write() = output;
+        backend.create(io[3].id, output);
     }
 }
 
@@ -406,6 +402,27 @@ mod tests {
             assert_approx_eq!(index, f16::to_f32(a), f16::to_f32(b), 1e-2);
         }
 
+        let data: Arc<_> = (0..C).map(|_| fastrand::f32()).map(f16::from_f32).collect();
+        let a = Tensor::create(cpu.clone(), [C], data.clone());
+        let a = a.softmax();
+
+        let output = a.back().await?;
+        let r#ref: Box<_> = {
+            let max = data.iter().copied().fold(f16::NEG_INFINITY, f16::max);
+            let exp_sum: f32 = data.iter().map(|&v| f16::to_f32(v - max).exp()).sum();
+            data.iter()
+                .map(|v| v - max)
+                .map(f16::to_f32)
+                .map(f32::exp)
+                .map(move |v| v / exp_sum)
+                .map(f16::from_f32)
+                .collect()
+        };
+
+        for (index, (&a, &b)) in output.iter().zip(r#ref.iter()).enumerate() {
+            assert_approx_eq!(index, f16::to_f32(a), f16::to_f32(b), 1e-2);
+        }
+
         Ok(())
     }
 
@@ -434,6 +451,25 @@ mod tests {
                     .collect::<Box<_>>()
             })
             .collect();
+
+        for (index, (&a, &b)) in output.iter().zip(r#ref.iter()).enumerate() {
+            assert_approx_eq!(index, a, b, 1e-2);
+        }
+
+        let data: Arc<_> = (0..C).map(|_| fastrand::f32()).collect();
+        let a = Tensor::create(cpu.clone(), [C], data.clone());
+        let a = a.softmax();
+
+        let output = a.back().await?;
+        let r#ref: Box<_> = {
+            let max = data.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let exp_sum: f32 = data.iter().map(|&v| (v - max).exp()).sum();
+            data.iter()
+                .map(|v| v - max)
+                .map(f32::exp)
+                .map(move |v| v / exp_sum)
+                .collect()
+        };
 
         for (index, (&a, &b)) in output.iter().zip(r#ref.iter()).enumerate() {
             assert_approx_eq!(index, a, b, 1e-2);

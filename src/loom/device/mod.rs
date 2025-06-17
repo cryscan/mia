@@ -1,8 +1,10 @@
-use std::any::TypeId;
+use std::{any::TypeId, borrow::Cow};
 
 use derive_more::{Deref, DerefMut};
 use rustc_hash::FxHashMap as HashMap;
 use thiserror::Error;
+
+use crate::loom::num::Scalar;
 
 use super::{
     ops::{TensorIr, TensorOp, TensorTape},
@@ -60,9 +62,12 @@ pub trait Backend {
     /// Dynamically dispatch to actual `op`'s execution, using given `io`.
     async fn execute(&mut self, op: &dyn TensorOp, io: Vec<TensorIr>);
     /// Create a buffer for tensor of `id`.
-    fn create(&mut self, id: TensorId, contents: &[u8]) -> Self::Data;
+    fn create<'a, T, C>(&mut self, id: TensorId, contents: C) -> Self::Data
+    where
+        T: Scalar,
+        C: Into<Cow<'a, [T]>>;
     /// Allocate a buffer for tensor of `id`.
-    fn alloc(&mut self, id: TensorId, size: usize) -> Self::Data;
+    fn alloc<T: Scalar>(&mut self, id: TensorId, count: usize) -> Self::Data;
     /// Get the buffer of tensor of `id`.
     fn fetch(&self, id: TensorId) -> Self::Data;
 }

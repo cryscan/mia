@@ -197,9 +197,6 @@ impl TensorOp for AllocOp {
 
 impl<B: Backend> BackendOp<B> for AllocOp {
     async fn execute(&self, backend: &mut B, io: Vec<TensorIr>) {
-        io.iter()
-            .filter(|ir| matches!(ir.access, Access::WriteOnly))
-            .for_each(|ir| _ = backend.alloc(ir.id, ir.data_size()));
         backend.execute(self.op.as_ref(), io).await;
     }
 }

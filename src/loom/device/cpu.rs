@@ -1,5 +1,6 @@
 use std::{
     any::TypeId,
+    borrow::Cow,
     cell::{RefCell, RefMut},
     marker::PhantomData,
     ops::{Deref, DerefMut},
@@ -21,29 +22,46 @@ use crate::loom::{
 };
 
 #[derive(Debug, Clone)]
-pub struct Buffer(Arc<RwLock<Box<[u8]>>>);
+pub struct Buffer {
+    data: Arc<RwLock<Box<[u8]>>>,
+    align: usize,
+}
 
-impl From<Box<[u8]>> for Buffer {
-    fn from(value: Box<[u8]>) -> Self {
-        Self(Arc::new(RwLock::new(value)))
+impl<T: Scalar> From<Box<[T]>> for Buffer {
+    fn from(value: Box<[T]>) -> Self {
+        let size = value.len() * size_of::<T>();
+        let ptr = Box::leak(value) as *mut [T] as *mut u8;
+        let boxed = unsafe {
+            // SAFETY: The pointer must be valid and aligned for `u8` and must not be null.
+            let slice = ::core::slice::from_raw_parts(ptr, size);
+            Box::from(slice)
+        };
+        let data = Arc::new(RwLock::new(boxed));
+        let align = align_of::<T>();
+        Self { data, align }
     }
 }
 
-impl From<Vec<u8>> for Buffer {
-    fn from(value: Vec<u8>) -> Self {
+impl<T: Scalar> From<Vec<T>> for Buffer {
+    fn from(value: Vec<T>) -> Self {
         value.into_boxed_slice().into()
     }
 }
 
 impl Buffer {
     #[inline]
+    pub fn align(&self) -> usize {
+        self.align
+    }
+
+    #[inline]
     pub fn read(&self) -> impl Deref<Target = Box<[u8]>> {
-        self.0.read().expect("failed to lock buffer")
+        self.data.read().expect("failed to lock buffer")
     }
 
     #[inline]
     pub fn write(&self) -> impl DerefMut<Target = Box<[u8]>> {
-        self.0.write().expect("failed to lock buffer")
+        self.data.write().expect("failed to lock buffer")
     }
 
     #[inline]
@@ -62,9 +80,21 @@ impl Buffer {
 
     #[inline]
     pub fn into_inner(self) -> Box<[u8]> {
-        match Arc::try_unwrap(self.0) {
+        match Arc::try_unwrap(self.data) {
             Ok(inner) => inner.into_inner().expect("lock poisoned"),
-            Err(this) => Self(this).read_slice().to_vec().into_boxed_slice(),
+            Err(data) => unsafe {
+                use std::alloc::{Layout, alloc_zeroed};
+
+                // SAFETY: We are guaranteed that the data is valid and properly aligned because it was
+                // created from a Box<[T]> and the alignment is preserved.
+                let data = data.read().expect("failed to lock buffer");
+                let size = data.len().max(64);
+                let align = self.align;
+                let layout = Layout::from_size_align(size, align).expect("invalid layout");
+                let ptr = alloc_zeroed(layout);
+                ptr.copy_from_nonoverlapping(data.as_ptr(), data.len());
+                Box::from_raw(std::slice::from_raw_parts_mut(ptr, size))
+            },
         }
     }
 }
@@ -139,24 +169,29 @@ impl super::Backend for Backend {
     }
 
     #[inline]
-    fn create(&mut self, id: TensorId, contents: &[u8]) -> Self::Data {
+    fn create<'a, T, C>(&mut self, id: TensorId, contents: C) -> Self::Data
+    where
+        T: Scalar,
+        C: Into<Cow<'a, [T]>>,
+    {
         let id = self.allocator().retrieve(id);
-        let data = Self::Data::from(contents.to_vec());
+        let data = Self::Data::from(contents.into().into_owned());
         self.buffers.insert(id, data.clone());
         data
     }
 
     #[inline]
-    fn alloc(&mut self, id: TensorId, size: usize) -> Self::Data {
+    fn alloc<T: Scalar>(&mut self, id: TensorId, count: usize) -> Self::Data {
         let id = self.allocator().retrieve(id);
         let data = self
             .buffers
             .get(&id)
             .cloned()
-            .filter(|data| data.read_slice::<u8>().len() == size);
+            .filter(|data| data.align() == align_of::<T>())
+            .filter(|data| data.read_slice::<T>().len() == count);
         let data = match data {
             Some(data) => data,
-            None => vec![0; size].into(),
+            None => vec![T::zero(); count].into(),
         };
         self.buffers.insert(id, data.clone());
         data

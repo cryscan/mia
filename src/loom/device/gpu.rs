@@ -4,6 +4,7 @@ use std::rc::Rc;
 use std::sync::Mutex;
 use std::{
     any::TypeId,
+    borrow::Cow,
     cell::{RefCell, RefMut},
     sync::Arc,
 };
@@ -17,6 +18,7 @@ use super::{
     allocator::{AllocOp, Allocator, StashId},
 };
 use crate::loom::{
+    num::Scalar,
     ops::{BackendOp, TensorIr, TensorOp},
     platform,
     tensor::TensorId,
@@ -56,9 +58,15 @@ impl super::Backend for Backend {
     }
 
     #[inline]
-    fn create(&mut self, id: TensorId, contents: &[u8]) -> Self::Data {
+    fn create<'a, T, C>(&mut self, id: TensorId, contents: C) -> Self::Data
+    where
+        T: Scalar,
+        C: Into<Cow<'a, [T]>>,
+    {
         use wgpu::util::DeviceExt;
         let id = self.allocator().retrieve(id);
+        let contents: Cow<_> = contents.into();
+        let contents = bytemuck::cast_slice(&contents);
         let data = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -73,8 +81,9 @@ impl super::Backend for Backend {
     }
 
     #[inline]
-    fn alloc(&mut self, id: TensorId, size: usize) -> Self::Data {
+    fn alloc<T: Scalar>(&mut self, id: TensorId, count: usize) -> Self::Data {
         let id = self.allocator().retrieve(id);
+        let size = size_of::<T>() * count;
         let data = self
             .buffers
             .get(&id)

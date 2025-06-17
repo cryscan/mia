@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{borrow::Cow, marker::PhantomData, sync::Arc};
 
 use half::f16;
 use mia_derive::TensorOp;
@@ -64,7 +64,7 @@ pub struct CreateOp<T: Scalar> {
 
 impl<B: Backend, T: Scalar> BackendOp<B> for CreateOp<T> {
     async fn execute(&self, backend: &mut B, io: Vec<TensorIr>) {
-        let contents = bytemuck::cast_slice(&self.contents);
+        let contents = Cow::Borrowed(self.contents.as_ref());
         backend.create(io[0].id, contents);
     }
 }
