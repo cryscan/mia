@@ -1,5 +1,4 @@
 use half::f16;
-use wide::f32x4;
 
 use crate::{
     hal::ops::AddOp,
@@ -13,154 +12,160 @@ use crate::{
 
 impl BackendOp<Backend> for AddOp<f32> {
     async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        debug_assert_eq!(io[0].layout, io[1].layout);
+        let layout = io[0].layout.clone();
+
         let x = backend.fetch(io[0].id);
         let y = backend.fetch(io[1].id);
 
         #[cfg(not(feature = "rayon"))]
-        let output = handle(move || {
-            use itertools::Itertools;
-
+        let output: Box<_> = handle(move || {
             let x = x.read_slice::<f32>();
             let y = y.read_slice::<f32>();
 
-            x.iter()
-                .zip_eq(y.iter())
-                .map(|(x, y)| x + y)
-                .flat_map(|z| z.to_ne_bytes())
+            layout
+                .iter_indices()
+                .map(|(_, index)| x[index] + y[index])
                 .collect()
         })
         .await;
         #[cfg(feature = "rayon")]
-        let output = handle(move || {
+        let output: Box<_> = handle(move || {
             use rayon::prelude::*;
 
             let x = x.read_slice::<f32>();
             let y = y.read_slice::<f32>();
 
-            x.par_iter()
-                .zip_eq(y.par_iter())
-                .map(|(x, y)| x + y)
-                .flat_map(|z| z.to_ne_bytes())
+            layout
+                .par_iter_indices()
+                .map(|(_, index)| x[index] + y[index])
                 .collect()
         })
         .await;
+
+        let output = output.into_iter().flat_map(|z| z.to_ne_bytes()).collect();
         *backend.fetch(io[2].id).write() = output;
     }
 }
 
 impl BackendOp<Backend> for AddOp<f16> {
     async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        debug_assert_eq!(io[0].layout, io[1].layout);
+        let layout = io[0].layout.clone();
+
         let x = backend.fetch(io[0].id);
         let y = backend.fetch(io[1].id);
 
         #[cfg(not(feature = "rayon"))]
-        let output = handle(move || {
-            use itertools::Itertools;
-
+        let output: Box<_> = handle(move || {
             let x = x.read_slice::<f16>();
             let y = y.read_slice::<f16>();
 
-            x.iter()
-                .zip_eq(y.iter())
-                .map(|(x, y)| x + y)
-                .flat_map(|z| z.to_ne_bytes())
+            layout
+                .iter_indices()
+                .map(|(_, index)| x[index] + y[index])
                 .collect()
         })
         .await;
         #[cfg(feature = "rayon")]
-        let output = handle(move || {
+        let output: Box<_> = handle(move || {
             use rayon::prelude::*;
 
             let x = x.read_slice::<f16>();
             let y = y.read_slice::<f16>();
 
-            x.par_iter()
-                .zip_eq(y.par_iter())
-                .map(|(x, y)| x + y)
-                .flat_map(|z| z.to_ne_bytes())
+            layout
+                .par_iter_indices()
+                .map(|(_, index)| x[index] + y[index])
                 .collect()
         })
         .await;
+
+        let output = output.into_iter().flat_map(|z| z.to_ne_bytes()).collect();
         *backend.fetch(io[2].id).write() = output;
     }
 }
 
 impl BackendOp<Backend> for AddOp<F32x4> {
     async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        debug_assert_eq!(io[0].layout, io[1].layout);
+        let layout = io[0].layout.clone();
+
         let x = backend.fetch(io[0].id);
         let y = backend.fetch(io[1].id);
 
         #[cfg(not(feature = "rayon"))]
-        let output = handle(move || {
-            use itertools::Itertools;
-
+        let output: Box<_> = handle(move || {
             let x = x.read_slice::<F32x4>();
             let y = y.read_slice::<F32x4>();
 
-            x.iter()
-                .copied()
-                .map(f32x4::from)
-                .zip_eq(y.iter().copied().map(f32x4::from))
-                .map(|(x, y)| x + y)
-                .flat_map(|z| z.to_array())
-                .flat_map(|z| z.to_ne_bytes())
+            layout
+                .iter_indices()
+                .map(|(_, index)| x[index] + y[index])
                 .collect()
         })
         .await;
         #[cfg(feature = "rayon")]
-        let output = handle(move || {
+        let output: Box<_> = handle(move || {
             use rayon::prelude::*;
 
             let x = x.read_slice::<F32x4>();
             let y = y.read_slice::<F32x4>();
 
-            x.par_iter()
-                .copied()
-                .map(f32x4::from)
-                .zip_eq(y.par_iter().copied().map(f32x4::from))
-                .map(|(x, y)| x + y)
-                .flat_map(|z| z.to_array())
-                .flat_map(|z| z.to_ne_bytes())
+            layout
+                .par_iter_indices()
+                .map(|(_, index)| x[index] + y[index])
                 .collect()
         })
         .await;
+
+        let output = output
+            .into_iter()
+            .flat_map(|z| z.0)
+            .flat_map(|z| z.to_ne_bytes())
+            .collect();
         *backend.fetch(io[2].id).write() = output;
     }
 }
 
 impl BackendOp<Backend> for AddOp<F16x4> {
     async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        debug_assert_eq!(io[0].layout, io[1].layout);
+        let layout = io[0].layout.clone();
+
         let x = backend.fetch(io[0].id);
         let y = backend.fetch(io[1].id);
 
         #[cfg(not(feature = "rayon"))]
-        let output = handle(move || {
-            use itertools::Itertools;
-
+        let output: Box<_> = handle(move || {
             let x = x.read_slice::<f16>();
             let y = y.read_slice::<f16>();
 
-            x.iter()
-                .zip_eq(y.iter())
-                .map(|(x, y)| x + y)
-                .flat_map(|z| z.to_ne_bytes())
+            layout
+                .iter_indices()
+                .flat_map(|(_, index)| x[index].iter().zip(y[index].iter()).map(|(x, y)| x + y))
                 .collect()
         })
         .await;
         #[cfg(feature = "rayon")]
-        let output = handle(move || {
+        let output: Box<_> = handle(move || {
             use rayon::prelude::*;
 
-            let x = x.read_slice::<f16>();
-            let y = y.read_slice::<f16>();
+            let x = x.read_slice::<F16x4>();
+            let y = y.read_slice::<F16x4>();
 
-            x.par_iter()
-                .zip_eq(y.par_iter())
-                .map(|(x, y)| x + y)
-                .flat_map(|z| z.to_ne_bytes())
+            layout
+                .par_iter_indices()
+                .map(|(_, index)| x[index] + y[index])
                 .collect()
         })
         .await;
+
+        let output = output
+            .into_iter()
+            .flat_map(|z| z.0)
+            .flat_map(|z| z.to_ne_bytes())
+            .collect();
         *backend.fetch(io[2].id).write() = output;
     }
 }

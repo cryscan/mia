@@ -124,11 +124,151 @@ impl From<F32x4> for f32x4 {
     }
 }
 
+impl std::ops::Add for F32x4 {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        let lhs = f32x4::from(self);
+        let rhs = f32x4::from(other);
+        Self::from(lhs + rhs)
+    }
+}
+
+impl std::ops::Sub for F32x4 {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self::Output {
+        let lhs = f32x4::from(self);
+        let rhs = f32x4::from(other);
+        Self::from(lhs - rhs)
+    }
+}
+
+impl std::ops::Mul for F32x4 {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self::Output {
+        let lhs = f32x4::from(self);
+        let rhs = f32x4::from(other);
+        Self::from(lhs * rhs)
+    }
+}
+
+impl std::ops::Div for F32x4 {
+    type Output = Self;
+
+    fn div(self, other: Self) -> Self::Output {
+        let lhs = f32x4::from(self);
+        let rhs = f32x4::from(other);
+        Self::from(lhs / rhs)
+    }
+}
+
+impl std::ops::AddAssign for F32x4 {
+    fn add_assign(&mut self, other: Self) {
+        *self = *self + other;
+    }
+}
+
+impl std::ops::SubAssign for F32x4 {
+    fn sub_assign(&mut self, other: Self) {
+        *self = *self - other;
+    }
+}
+
+impl std::ops::MulAssign for F32x4 {
+    fn mul_assign(&mut self, other: Self) {
+        *self = *self * other;
+    }
+}
+
+impl std::ops::DivAssign for F32x4 {
+    fn div_assign(&mut self, other: Self) {
+        *self = *self / other;
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, Deref, DerefMut, From, Into)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[repr(C)]
 pub struct F16x4(pub [f16; 4]);
+
+impl std::ops::Add for F16x4 {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        Self([
+            self.0[0] + other.0[0],
+            self.0[1] + other.0[1],
+            self.0[2] + other.0[2],
+            self.0[3] + other.0[3],
+        ])
+    }
+}
+
+impl std::ops::Sub for F16x4 {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self::Output {
+        Self([
+            self.0[0] - other.0[0],
+            self.0[1] - other.0[1],
+            self.0[2] - other.0[2],
+            self.0[3] - other.0[3],
+        ])
+    }
+}
+
+impl std::ops::Mul for F16x4 {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self::Output {
+        Self([
+            self.0[0] * other.0[0],
+            self.0[1] * other.0[1],
+            self.0[2] * other.0[2],
+            self.0[3] * other.0[3],
+        ])
+    }
+}
+
+impl std::ops::Div for F16x4 {
+    type Output = Self;
+
+    fn div(self, other: Self) -> Self::Output {
+        Self([
+            self.0[0] / other.0[0],
+            self.0[1] / other.0[1],
+            self.0[2] / other.0[2],
+            self.0[3] / other.0[3],
+        ])
+    }
+}
+
+impl std::ops::AddAssign for F16x4 {
+    fn add_assign(&mut self, other: Self) {
+        *self = *self + other;
+    }
+}
+
+impl std::ops::SubAssign for F16x4 {
+    fn sub_assign(&mut self, other: Self) {
+        *self = *self - other;
+    }
+}
+
+impl std::ops::MulAssign for F16x4 {
+    fn mul_assign(&mut self, other: Self) {
+        *self = *self * other;
+    }
+}
+
+impl std::ops::DivAssign for F16x4 {
+    fn div_assign(&mut self, other: Self) {
+        *self = *self / other;
+    }
+}
 
 impl_bytemuck!(U4x8);
 impl_bytemuck!(U8x4);
@@ -312,10 +452,26 @@ pub trait Float:
 impl Float for f32 {}
 impl Float for f16 {}
 
-pub trait Float4: Scalar {}
+pub trait Float4:
+    Scalar
+    + std::ops::Add<Output = Self>
+    + std::ops::Sub<Output = Self>
+    + std::ops::Mul<Output = Self>
+    + std::ops::Div<Output = Self>
+    + std::ops::AddAssign
+    + std::ops::SubAssign
+    + std::ops::MulAssign
+    + std::ops::DivAssign
+{
+    type Element: Float;
+}
 
-impl Float4 for F32x4 {}
-impl Float4 for F16x4 {}
+impl Float4 for F32x4 {
+    type Element = f32;
+}
+impl Float4 for F16x4 {
+    type Element = f16;
+}
 
 #[cfg(test)]
 mod tests {

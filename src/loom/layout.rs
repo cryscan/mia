@@ -465,6 +465,15 @@ impl Layout {
         (0..self.size()).map(|index| (index, self.value(index)))
     }
 
+    #[cfg(feature = "rayon")]
+    #[inline]
+    pub fn par_iter_indices(&self) -> impl rayon::iter::ParallelIterator<Item = (usize, usize)> {
+        use rayon::prelude::*;
+        (0..self.size())
+            .into_par_iter()
+            .map(|index| (index, self.value(index)))
+    }
+
     /// Returns `true` if two layouts are totally equal as index mappings.
     /// Note that this check is exponentially slow so only use it in tests.
     #[inline]
