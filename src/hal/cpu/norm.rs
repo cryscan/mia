@@ -1,5 +1,4 @@
 use half::f16;
-use itertools::Itertools;
 
 use crate::{
     hal::ops::{LayerNormOp, SoftmaxOp},
@@ -107,169 +106,219 @@ impl BackendOp<Backend> for SoftmaxOp<f16> {
 impl BackendOp<Backend> for LayerNormOp<f32> {
     async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
         let eps = self.eps;
-        let layout = io[0].layout.clone();
+        let layout = io[0].layout.pad_to(2);
         let x = backend.fetch(io[0].id);
         let w = backend.fetch(io[1].id);
         let b = backend.fetch(io[2].id);
 
         #[cfg(not(feature = "rayon"))]
-        let output = handle(move || {
-            let x = x.read_slice::<f32>();
-            let w = w.read_slice::<f16>();
-            let b = b.read_slice::<f16>();
+        let output: Box<_> = handle(move || {
+            let (lo, hi) = layout.split_at(0);
+            hi.iter_indices()
+                .flat_map(|(_, hi)| {
+                    let x = x.read_slice::<f32>();
+                    let w = w.read_slice::<f16>();
+                    let b = b.read_slice::<f16>();
 
-            let x = x.chunks_exact(layout.span_of(0));
+                    let (mean, m2, count) = lo.iter_indices().map(|(_, lo)| x[lo + hi]).fold(
+                        (0.0, 0.0, 0u32),
+                        |(mean, m2, count), x| {
+                            let count = count + 1;
+                            let delta = x - mean;
+                            let mean = mean + delta / count as f32;
+                            let m2 = m2 + delta * (x - mean);
+                            (mean, m2, count)
+                        },
+                    );
+                    let variance = m2 / count as f32 + eps;
+                    let deviation = 1.0 / variance.sqrt();
 
-            let x = x.map(|x| x.iter().step_by(layout.stride_of(0)));
-            let w = w.iter().step_by(layout.stride_of(0));
-            let b = b.iter().step_by(layout.stride_of(0));
-
-            x.flat_map(|x| {
-                let (mean, m2, count) =
-                    x.clone().fold((0.0, 0.0, 0u32), |(mean, m2, count), &x| {
-                        let count = count + 1;
-                        let delta = x - mean;
-                        let mean = mean + delta / count as f32;
-                        let m2 = m2 + delta * (x - mean);
-                        (mean, m2, count)
-                    });
-                let variance = m2 / count as f32 + eps;
-                let deviation = 1.0 / variance.sqrt();
-                let w = w.clone().copied().map(f16::to_f32);
-                let b = b.clone().copied().map(f16::to_f32);
-                x.clone()
-                    .zip_eq(w)
-                    .zip_eq(b)
-                    .map(move |((x, w), b)| (x - mean) * deviation * w + b)
-            })
-            .flat_map(|x| x.to_ne_bytes())
-            .collect()
+                    let mean = f16::from_f32(mean);
+                    let deviation = f16::from_f32(deviation);
+                    lo.iter_indices().map(move |(_, lo)| {
+                        let x = f16::from_f32(x[lo + hi]);
+                        let w = w[lo];
+                        let b = b[lo];
+                        (x - mean) * deviation * w + b
+                    })
+                })
+                .collect()
         })
         .await;
         #[cfg(feature = "rayon")]
-        let output = handle(move || {
+        let output: Box<_> = handle(move || {
             use rayon::prelude::*;
 
-            let x = x.read_slice::<f32>();
-            let w = w.read_slice::<f16>();
-            let b = b.read_slice::<f16>();
+            let (lo, hi) = layout.split_at(0);
+            hi.par_iter_indices()
+                .flat_map(|(_, hi)| {
+                    let (mean, m2, count) = lo
+                        .par_iter_indices()
+                        .map(|(_, lo)| x.read_slice::<f32>()[lo + hi])
+                        .fold(
+                            || (0.0, 0.0, 0u32),
+                            |(mean, m2, count), x| {
+                                let count = count + 1;
+                                let delta = x - mean;
+                                let mean = mean + delta / count as f32;
+                                let m2 = m2 + delta * (x - mean);
+                                (mean, m2, count)
+                            },
+                        )
+                        .reduce(
+                            || (0.0, 0.0, 0u32),
+                            |(mean_1, m2_1, count_1), (mean_2, m2_2, count_2)| {
+                                let count = count_1 + count_2;
+                                let delta = mean_2 - mean_1;
+                                let count_1 = count_1 as f32;
+                                let count_2 = count_2 as f32;
+                                let mean = match count {
+                                    0 => 0.0,
+                                    _ => (mean_1 * count_1 + mean_2 * count_2) / count as f32,
+                                };
+                                let m2 = match count {
+                                    0 => 0.0,
+                                    _ => m2_1 + m2_2 + delta * delta * (count_1 * count_2),
+                                };
+                                (mean, m2, count)
+                            },
+                        );
+                    let variance = m2 / count as f32 + eps;
+                    let deviation = 1.0 / variance.sqrt();
 
-            let x = x.par_chunks_exact(layout.span_of(0));
+                    let mean = f16::from_f32(mean);
+                    let deviation = f16::from_f32(deviation);
 
-            let x = x.map(|x| x.iter().step_by(layout.stride_of(0)));
-            let w = w.par_iter().step_by(layout.stride_of(0));
-            let b = b.par_iter().step_by(layout.stride_of(0));
+                    let x = x.clone();
+                    let w = w.clone();
+                    let b = b.clone();
+                    lo.par_iter_indices().map(move |(_, lo)| {
+                        let x = x.read_slice::<f32>();
+                        let w = w.read_slice::<f16>();
+                        let b = b.read_slice::<f16>();
 
-            x.flat_map(|x| {
-                let (mean, m2, count) =
-                    x.clone().fold((0.0, 0.0, 0u32), |(mean, m2, count), &x| {
-                        let count = count + 1;
-                        let delta = x - mean;
-                        let mean = mean + delta / count as f32;
-                        let m2 = m2 + delta * (x - mean);
-                        (mean, m2, count)
-                    });
-                let variance = m2 / count as f32 + eps;
-                let deviation = 1.0 / variance.sqrt();
-                let w = w.clone().copied().map(f16::to_f32);
-                let b = b.clone().copied().map(f16::to_f32);
-                let x = x.clone().collect_vec();
-                x.into_par_iter()
-                    .zip_eq(w)
-                    .zip_eq(b)
-                    .map(move |((x, w), b)| (x - mean) * deviation * w + b)
-            })
-            .flat_map(|x| x.to_ne_bytes())
-            .collect()
+                        let x = f16::from_f32(x[lo + hi]);
+                        let w = w[lo];
+                        let b = b[lo];
+                        (x - mean) * deviation * w + b
+                    })
+                })
+                .collect()
         })
         .await;
-        *backend.fetch(io[1].id).write() = output;
+
+        let output = output.into_iter().flat_map(|z| z.to_ne_bytes()).collect();
+        *backend.fetch(io[3].id).write() = output;
     }
 }
 
 impl BackendOp<Backend> for LayerNormOp<f16> {
     async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
         let eps = self.eps;
-        let layout = io[0].layout.clone();
+        let layout = io[0].layout.pad_to(2);
         let x = backend.fetch(io[0].id);
         let w = backend.fetch(io[1].id);
         let b = backend.fetch(io[2].id);
 
         #[cfg(not(feature = "rayon"))]
-        let output = handle(move || {
-            let x = x.read_slice::<f16>();
-            let w = w.read_slice::<f16>();
-            let b = b.read_slice::<f16>();
+        let output: Box<_> = handle(move || {
+            let (lo, hi) = layout.split_at(0);
+            hi.iter_indices()
+                .flat_map(|(_, hi)| {
+                    let x = x.read_slice::<f16>();
+                    let w = w.read_slice::<f16>();
+                    let b = b.read_slice::<f16>();
 
-            let x = x.chunks_exact(layout.span_of(0));
+                    let (mean, m2, count) = lo
+                        .iter_indices()
+                        .map(|(_, lo)| x[lo + hi])
+                        .map(f16::to_f32)
+                        .fold((0.0, 0.0, 0u32), |(mean, m2, count), x| {
+                            let count = count + 1;
+                            let delta = x - mean;
+                            let mean = mean + delta / count as f32;
+                            let m2 = m2 + delta * (x - mean);
+                            (mean, m2, count)
+                        });
+                    let variance = m2 / count as f32 + eps;
+                    let deviation = 1.0 / variance.sqrt();
 
-            let x = x.map(|x| x.iter().step_by(layout.stride_of(0)));
-            let w = w.iter().step_by(layout.stride_of(0));
-            let b = b.iter().step_by(layout.stride_of(0));
-
-            x.flat_map(|x| {
-                let (mean, m2, count) =
-                    x.clone().fold((0.0, 0.0, 0u32), |(mean, m2, count), &x| {
-                        let x = f16::to_f32(x);
-                        let count = count + 1;
-                        let delta = x - mean;
-                        let mean = mean + delta / count as f32;
-                        let m2 = m2 + delta * (x - mean);
-                        (mean, m2, count)
-                    });
-                let variance = m2 / count as f32 + eps;
-                let deviation = f16::from_f32(1.0 / variance.sqrt());
-                let mean = f16::from_f32(mean);
-                let w = w.clone();
-                let b = b.clone();
-                x.clone()
-                    .zip_eq(w)
-                    .zip_eq(b)
-                    .map(move |((x, w), b)| (x - mean) * deviation * w + b)
-            })
-            .flat_map(|x| x.to_ne_bytes())
-            .collect()
+                    let mean = f16::from_f32(mean);
+                    let deviation = f16::from_f32(deviation);
+                    lo.iter_indices().map(move |(_, lo)| {
+                        let x = x[lo + hi];
+                        let w = w[lo];
+                        let b = b[lo];
+                        (x - mean) * deviation * w + b
+                    })
+                })
+                .collect()
         })
         .await;
         #[cfg(feature = "rayon")]
-        let output = handle(move || {
+        let output: Box<_> = handle(move || {
             use rayon::prelude::*;
 
-            let x = x.read_slice::<f16>();
-            let w = w.read_slice::<f16>();
-            let b = b.read_slice::<f16>();
+            let (lo, hi) = layout.split_at(0);
+            hi.par_iter_indices()
+                .flat_map(|(_, hi)| {
+                    let (mean, m2, count) = lo
+                        .par_iter_indices()
+                        .map(|(_, lo)| x.read_slice::<f16>()[lo + hi])
+                        .map(f16::to_f32)
+                        .fold(
+                            || (0.0, 0.0, 0u32),
+                            |(mean, m2, count), x| {
+                                let count = count + 1;
+                                let delta = x - mean;
+                                let mean = mean + delta / count as f32;
+                                let m2 = m2 + delta * (x - mean);
+                                (mean, m2, count)
+                            },
+                        )
+                        .reduce(
+                            || (0.0, 0.0, 0u32),
+                            |(mean_1, m2_1, count_1), (mean_2, m2_2, count_2)| {
+                                let count = count_1 + count_2;
+                                let delta = mean_2 - mean_1;
+                                let count_1 = count_1 as f32;
+                                let count_2 = count_2 as f32;
+                                let mean = match count {
+                                    0 => 0.0,
+                                    _ => (mean_1 * count_1 + mean_2 * count_2) / count as f32,
+                                };
+                                let m2 = match count {
+                                    0 => 0.0,
+                                    _ => m2_1 + m2_2 + delta * delta * (count_1 * count_2),
+                                };
+                                (mean, m2, count)
+                            },
+                        );
+                    let variance = m2 / count as f32 + eps;
+                    let deviation = 1.0 / variance.sqrt();
 
-            let x = x.par_chunks_exact(layout.span_of(0));
+                    let mean = f16::from_f32(mean);
+                    let deviation = f16::from_f32(deviation);
 
-            let x = x.map(|x| x.iter().step_by(layout.stride_of(0)));
-            let w = w.par_iter().step_by(layout.stride_of(0));
-            let b = b.par_iter().step_by(layout.stride_of(0));
+                    let x = x.clone();
+                    let w = w.clone();
+                    let b = b.clone();
+                    lo.par_iter_indices().map(move |(_, lo)| {
+                        let x = x.read_slice::<f16>();
+                        let w = w.read_slice::<f16>();
+                        let b = b.read_slice::<f16>();
 
-            x.flat_map(|x| {
-                let (mean, m2, count) =
-                    x.clone().fold((0.0, 0.0, 0u32), |(mean, m2, count), &x| {
-                        let x = f16::to_f32(x);
-                        let count = count + 1;
-                        let delta = x - mean;
-                        let mean = mean + delta / count as f32;
-                        let m2 = m2 + delta * (x - mean);
-                        (mean, m2, count)
-                    });
-                let variance = m2 / count as f32 + eps;
-                let deviation = f16::from_f32(1.0 / variance.sqrt());
-                let mean = f16::from_f32(mean);
-                let w = w.clone();
-                let b = b.clone();
-                let x = x.clone().collect_vec();
-                x.into_par_iter()
-                    .zip_eq(w)
-                    .zip_eq(b)
-                    .map(move |((x, w), b)| (x - mean) * deviation * w + b)
-            })
-            .flat_map(|x| x.to_ne_bytes())
-            .collect()
+                        let x = x[lo + hi];
+                        let w = w[lo];
+                        let b = b[lo];
+                        (x - mean) * deviation * w + b
+                    })
+                })
+                .collect()
         })
         .await;
-        *backend.fetch(io[1].id).write() = output;
+
+        let output = output.into_iter().flat_map(|z| z.to_ne_bytes()).collect();
+        *backend.fetch(io[3].id).write() = output;
     }
 }
