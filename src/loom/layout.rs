@@ -275,6 +275,17 @@ impl Coord {
     pub fn from_slice(slice: &[usize]) -> Self {
         Self(slice.into())
     }
+
+    #[inline]
+    pub fn concat(&self, other: impl AsRef<Self>) -> Self {
+        Self::from([&self[..], &other.as_ref()[..]].concat())
+    }
+
+    #[inline]
+    pub fn split_at(&self, mid: usize) -> (Self, Self) {
+        let (left, right) = self.0.split_at(mid);
+        (left.to_vec().into(), right.to_vec().into())
+    }
 }
 
 /// A [`Layout`] is a mapping of multi-dimensional indices.
@@ -398,6 +409,17 @@ impl Layout {
     #[inline]
     pub fn span_of(&self, mode: usize) -> usize {
         self.shape_of(mode) * self.stride_of(mode)
+    }
+
+    /// Pads the layout to a given length, if current length is less than that.
+    #[inline]
+    pub fn pad_to(&self, len: usize) -> Self {
+        if self.len() >= len {
+            return self.clone();
+        }
+        let mut layout = self.to_vec();
+        layout.resize_with(len, || (1, 0));
+        Self::from(layout)
     }
 
     /// Returns `true` if the layout is of size 0.
@@ -597,7 +619,7 @@ impl Layout {
     #[inline]
     pub fn split_at(&self, mid: usize) -> (Self, Self) {
         let (left, right) = self.0.split_at(mid);
-        (Self::from(left.to_vec()), Self::from(right.to_vec()))
+        (left.to_vec().into(), right.to_vec().into())
     }
 
     /// Make a tiler from this layout.
@@ -728,7 +750,7 @@ impl<T: AsRef<Layout>> Compose<T> for Layout {
             .try_collect()?;
         let layout = modes
             .into_iter()
-            .fold(Layout::default(), |acc, x| acc.concat(&x));
+            .fold(Layout::default(), |acc, x| acc.concat(x));
         Ok(layout)
     }
 }
@@ -945,7 +967,7 @@ mod tests {
             }
 
             // 4. complement
-            assert!(layout.concat(&complement).complement_full().size() <= 1);
+            assert!(layout.concat(complement).complement_full().size() <= 1);
 
             Ok(())
         }

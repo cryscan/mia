@@ -138,12 +138,12 @@ impl BackendOp<Backend> for AddOp<F16x4> {
 
         #[cfg(not(feature = "rayon"))]
         let output: Box<_> = handle(move || {
-            let x = x.read_slice::<f16>();
-            let y = y.read_slice::<f16>();
+            let x = x.read_slice::<F16x4>();
+            let y = y.read_slice::<F16x4>();
 
             layout
                 .iter_indices()
-                .flat_map(|(_, index)| x[index].iter().zip(y[index].iter()).map(|(x, y)| x + y))
+                .map(|(_, index)| x[index] + y[index])
                 .collect()
         })
         .await;

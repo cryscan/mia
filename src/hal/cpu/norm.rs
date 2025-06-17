@@ -12,41 +12,47 @@ use crate::{
 
 impl BackendOp<Backend> for SoftmaxOp<f32> {
     async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
-        let layout = io[0].layout.clone();
+        let layout = io[0].layout.pad_to(2);
         let x = backend.fetch(io[0].id);
 
         #[cfg(not(feature = "rayon"))]
-        let output = handle(move || {
-            let x = x.read_slice::<f32>();
-            x.chunks_exact(layout.span_of(0))
-                .map(|x| x.iter().step_by(layout.stride_of(0)))
-                .flat_map(|x| {
-                    let max = x.clone().copied().fold(f32::NEG_INFINITY, f32::max);
+        let output: Box<_> = handle(move || {
+            let (lo, hi) = layout.split_at(0);
+            hi.iter_indices()
+                .flat_map(|(_, hi)| {
+                    let x = x.read_slice::<f32>();
+                    let x: Vec<_> = lo.iter_indices().map(move |(_, lo)| x[lo + hi]).collect();
+                    let x = x.into_iter();
+
+                    let max = x.clone().fold(f32::NEG_INFINITY, f32::max);
                     let x = x.map(move |x| (x - max).exp());
                     let sum: f32 = x.clone().sum();
                     x.map(move |x| x / sum)
                 })
-                .flat_map(|x| x.to_ne_bytes())
                 .collect()
         })
         .await;
         #[cfg(feature = "rayon")]
-        let output = handle(move || {
+        let output: Box<_> = handle(move || {
             use rayon::prelude::*;
 
-            let x = x.read_slice::<f32>();
-            x.par_chunks_exact(layout.span_of(0))
-                .map(|x| x.par_iter().step_by(layout.stride_of(0)))
-                .flat_map(|x| {
-                    let max = x.clone().copied().reduce(|| f32::NEG_INFINITY, f32::max);
+            let (lo, hi) = layout.split_at(0);
+            hi.par_iter_indices()
+                .flat_map(|(_, hi)| {
+                    let x = x.read_slice::<f32>();
+                    let x: Vec<_> = lo.iter_indices().map(move |(_, lo)| x[lo + hi]).collect();
+                    let x = x.into_par_iter();
+
+                    let max = x.clone().reduce(|| f32::NEG_INFINITY, f32::max);
                     let x = x.map(move |x| (x - max).exp());
                     let sum: f32 = x.clone().sum();
                     x.map(move |x| x / sum)
                 })
-                .flat_map(|x| x.to_ne_bytes())
                 .collect()
         })
         .await;
+
+        let output = output.into_iter().flat_map(|z| z.to_ne_bytes()).collect();
         *backend.fetch(io[1].id).write() = output;
     }
 }
@@ -57,37 +63,43 @@ impl BackendOp<Backend> for SoftmaxOp<f16> {
         let x = backend.fetch(io[0].id);
 
         #[cfg(not(feature = "rayon"))]
-        let output = handle(move || {
-            let x = x.read_slice::<f16>();
-            x.chunks_exact(layout.span_of(0))
-                .map(|x| x.iter().step_by(layout.stride_of(0)))
-                .flat_map(|x| {
-                    let max = x.clone().copied().fold(f16::NEG_INFINITY, f16::max);
+        let output: Box<_> = handle(move || {
+            let (lo, hi) = layout.split_at(0);
+            hi.iter_indices()
+                .flat_map(|(_, hi)| {
+                    let x = x.read_slice::<f16>();
+                    let x: Vec<_> = lo.iter_indices().map(move |(_, lo)| x[lo + hi]).collect();
+                    let x = x.into_iter();
+
+                    let max = x.clone().fold(f16::NEG_INFINITY, f16::max);
                     let x = x.map(move |x| f16::to_f32(x - max).exp());
                     let sum: f32 = x.clone().sum();
-                    x.map(move |x| x / sum)
+                    x.map(move |x| x / sum).map(f16::from_f32)
                 })
-                .flat_map(|x| f16::from_f32(x).to_ne_bytes())
                 .collect()
         })
         .await;
         #[cfg(feature = "rayon")]
-        let output = handle(move || {
+        let output: Box<_> = handle(move || {
             use rayon::prelude::*;
 
-            let x = x.read_slice::<f16>();
-            x.par_chunks_exact(layout.span_of(0))
-                .map(|x| x.par_iter().step_by(layout.stride_of(0)))
-                .flat_map(|x| {
-                    let max = x.clone().copied().reduce(|| f16::NEG_INFINITY, f16::max);
+            let (lo, hi) = layout.split_at(0);
+            hi.par_iter_indices()
+                .flat_map(|(_, hi)| {
+                    let x = x.read_slice::<f16>();
+                    let x: Vec<_> = lo.iter_indices().map(move |(_, lo)| x[lo + hi]).collect();
+                    let x = x.into_par_iter();
+
+                    let max = x.clone().reduce(|| f16::NEG_INFINITY, f16::max);
                     let x = x.map(move |x| f16::to_f32(x - max).exp());
                     let sum: f32 = x.clone().sum();
-                    x.map(move |x| x / sum)
+                    x.map(move |x| x / sum).map(f16::from_f32)
                 })
-                .flat_map(|x| f16::from_f32(x).to_ne_bytes())
                 .collect()
         })
         .await;
+
+        let output = output.into_iter().flat_map(|z| z.to_ne_bytes()).collect();
         *backend.fetch(io[1].id).write() = output;
     }
 }
