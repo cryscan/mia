@@ -487,6 +487,7 @@ impl Layout {
         (0..self.size()).map(|index| (index, self.value(index)))
     }
 
+    /// Returns a parallel iterator over indices and their values.
     #[cfg(feature = "rayon")]
     #[inline]
     pub fn par_iter_indices(&self) -> impl rayon::iter::ParallelIterator<Item = (usize, usize)> {
