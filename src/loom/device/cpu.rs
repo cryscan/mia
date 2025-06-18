@@ -11,7 +11,7 @@ use itertools::Itertools;
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use super::{
-    BackData, Backend as _, Device, DeviceEvent, DeviceId, OpVTable,
+    BackData, Backend as _, Device, DeviceEvent, DeviceId, ExecuteData, OpVTable,
     allocator::{AllocOp, Allocator, StashId},
 };
 use crate::loom::{
@@ -279,11 +279,12 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
     while let Ok(event) = receiver.recv_async().await {
         match event {
             DeviceEvent::Execute { tape, sender } => {
-                let id = async {
+                let data = async {
                     let ops = tape
                         .ops
-                        .into_iter()
+                        .iter()
                         .filter(|op| !commit.contains(&op.id()))
+                        .cloned()
                         .collect_vec();
                     for op in ops {
                         let op = backend.allocator().alloc(op)?;
@@ -292,10 +293,11 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         backend.execute(&op, io).await;
                         commit.insert(id);
                     }
-                    Ok(tape.id)
+                    let data = tape.print_mermaid_alloc(backend.allocator());
+                    Ok(ExecuteData(data))
                 }
                 .await;
-                _ = sender.send_async(id).await
+                _ = sender.send_async(data).await
             }
             DeviceEvent::Back { tape, sender } => {
                 let data = async {

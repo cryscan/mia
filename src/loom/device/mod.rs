@@ -1,13 +1,12 @@
 use std::{any::TypeId, borrow::Cow};
 
-use derive_more::{Deref, DerefMut};
+use derive_more::{Deref, DerefMut, Display};
 use rustc_hash::FxHashMap as HashMap;
 use thiserror::Error;
 
-use crate::loom::num::Scalar;
-
 use super::{
-    ops::{TensorIr, TensorOp, TensorTape},
+    num::Scalar,
+    ops::{Mermaid, TensorIr, TensorOp, TensorTape},
     platform::BoxFuture,
     tensor::TensorId,
 };
@@ -37,6 +36,9 @@ pub enum DeviceError {
     Alloc(#[from] allocator::AllocError),
 }
 
+#[derive(Debug, Display, Clone, Deref, DerefMut)]
+pub struct ExecuteData(pub Mermaid);
+
 #[derive(Debug, Clone, Deref, DerefMut)]
 pub struct BackData(pub Box<[u8]>);
 
@@ -44,7 +46,7 @@ pub struct BackData(pub Box<[u8]>);
 pub enum DeviceEvent {
     Execute {
         tape: TensorTape,
-        sender: flume::Sender<Result<TensorId, DeviceError>>,
+        sender: flume::Sender<Result<ExecuteData, DeviceError>>,
     },
     Back {
         tape: TensorTape,

@@ -169,10 +169,13 @@ impl PartialEq for TensorTape {
 
 impl Eq for TensorTape {}
 
+#[derive(Debug, Display, Clone, Deref, DerefMut)]
+pub struct Mermaid(pub String);
+
 impl TensorTape {
     /// Prints the tape in Mermaid format.
-    pub fn print_mermaid(&self) -> String {
-        let mut s = "graph LR\n".to_string();
+    pub fn print_mermaid(&self) -> Mermaid {
+        let mut s = "graph TD\n".to_string();
 
         for (index, op) in self.ops.iter().enumerate() {
             let op_node = format!("op_{}", index);
@@ -186,17 +189,17 @@ impl TensorTape {
                 match ir.access {
                     Access::ReadOnly => {
                         s.push_str(&format!("    {}((\"{}\"))\n", tensor_node, tensor_label));
-                        s.push_str(&format!("    {} --> {}\n", tensor_node, op_node));
+                        s.push_str(&format!("    {} --> |Read| {}\n", tensor_node, op_node));
                     }
                     Access::WriteOnly => {
                         s.push_str(&format!("    {}((\"{}\"))\n", tensor_node, tensor_label));
-                        s.push_str(&format!("    {} --> {}\n", op_node, tensor_node));
+                        s.push_str(&format!("    {} --> |Write| {}\n", op_node, tensor_node));
                     }
                     _ => {}
                 }
             }
         }
-        s
+        Mermaid(s)
     }
 }
 

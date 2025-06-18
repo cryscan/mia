@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use super::Backend;
 use crate::loom::{
-    ops::{Access, BackendOp, TensorIr, TensorOp, TensorOpId},
+    ops::{Access, BackendOp, Mermaid, TensorIr, TensorOp, TensorOpId, TensorTape},
     tensor::TensorId,
 };
 
@@ -194,6 +194,40 @@ impl Allocator {
 impl std::fmt::Display for Allocator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.print_pretty())
+    }
+}
+
+impl TensorTape {
+    pub fn print_mermaid_alloc<A>(&self, mut allocator: A) -> Mermaid
+    where
+        A: std::ops::DerefMut<Target = Allocator>,
+    {
+        let allocator = allocator.deref_mut();
+        let mut s = "graph TD\n".to_string();
+
+        for (index, op) in self.ops.iter().enumerate() {
+            let op_node = format!("op_{}", index);
+            let op_label = format!("{}", op.name());
+            s.push_str(&format!("    {}[\"{}\"]\n", op_node, op_label));
+
+            for ir in op.io() {
+                let tensor_node = format!("tensor_{}", ir.id);
+                let tensor_label = format!("{}", allocator.retrieve(ir.id));
+
+                match ir.access {
+                    Access::ReadOnly => {
+                        s.push_str(&format!("    {}((\"{}\"))\n", tensor_node, tensor_label));
+                        s.push_str(&format!("    {} --> |Read| {}\n", tensor_node, op_node));
+                    }
+                    Access::WriteOnly => {
+                        s.push_str(&format!("    {}((\"{}\"))\n", tensor_node, tensor_label));
+                        s.push_str(&format!("    {} --> |Write| {}\n", op_node, tensor_node));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Mermaid(s)
     }
 }
 

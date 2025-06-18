@@ -8,7 +8,7 @@ use crate::loom::{
     device::{Device, DeviceError, DeviceEvent},
     layout::IntoLayout,
     num::{Float, Scalar},
-    ops::{Access, InnerOp, OneOp, TensorOp},
+    ops::{Access, InnerOp, Mermaid, OneOp, TensorOp},
     tensor::Tensor,
 };
 
@@ -40,6 +40,20 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
         output.replace_ops(ops);
 
         output
+    }
+
+    /// Generate a Mermaid diagram representation of the tensor's computation graph.
+    ///
+    /// This function executes the tensor's computation graph on the device and returns a `Mermaid` struct,
+    /// which can be used to visualize the graph as a Mermaid diagram.
+    #[inline]
+    pub async fn mermaid(self) -> Result<Mermaid, DeviceError> {
+        let (sender, receiver) = flume::bounded(0);
+        let tape = self.tape().clone();
+        let event = DeviceEvent::Execute { tape, sender };
+        self.device().execute(event);
+        let data = receiver.recv_async().await??;
+        Ok(data.0)
     }
 
     /// Read back the contents of the tensor from the device.

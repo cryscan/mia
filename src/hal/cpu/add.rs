@@ -184,6 +184,7 @@ mod tests {
 
         let r#ref = data.par_iter().map(|x| x + x + x + x).collect::<Box<_>>();
 
+        println!("{}", d.clone().mermaid().await?);
         let output = d.back().await?;
         assert_eq!(output, r#ref);
 
@@ -217,6 +218,7 @@ mod tests {
 
         let d = b.clone() + b;
 
+        println!("{}", d.clone().mermaid().await?);
         let output = d.cast::<f32>([C, T]).back().await?;
         assert_eq!(output, r#ref);
 

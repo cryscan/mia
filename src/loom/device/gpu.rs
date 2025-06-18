@@ -14,7 +14,7 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use thiserror::Error;
 
 use super::{
-    BackData, Backend as _, Device, DeviceError, DeviceEvent, DeviceId, OpVTable,
+    BackData, Backend as _, Device, DeviceError, DeviceEvent, DeviceId, ExecuteData, OpVTable,
     allocator::{AllocOp, Allocator, StashId},
 };
 use crate::loom::{
@@ -268,8 +268,9 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                 let id = async {
                     let ops = tape
                         .ops
-                        .into_iter()
+                        .iter()
                         .filter(|op| !commit.contains(&op.id()))
+                        .cloned()
                         .collect_vec();
                     for op in ops {
                         let op = backend.allocator().alloc(op)?;
@@ -296,6 +297,9 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         v.push(command.clone());
                         commands.insert(id, v);
 
+                        let data = tape.print_mermaid_alloc(backend.allocator());
+                        let data = ExecuteData(data);
+
                         let device = backend.device.clone();
                         let kernels = std::mem::take(&mut backend.kernels);
                         platform::dispatch(move || {
@@ -306,7 +310,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                                 .replace(encode(&device, &kernels));
                             #[cfg(target_arch = "wasm32")]
                             command.borrow_mut().replace(encode(&device, &kernels));
-                            _ = sender.send(Ok(id))
+                            _ = sender.send(Ok(data))
                         });
                     }
                     Err(err) => _ = sender.send_async(Err(err)).await,
