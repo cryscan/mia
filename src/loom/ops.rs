@@ -169,6 +169,37 @@ impl PartialEq for TensorTape {
 
 impl Eq for TensorTape {}
 
+impl TensorTape {
+    /// Prints the tape in Mermaid format.
+    pub fn print_mermaid(&self) -> String {
+        let mut s = "graph LR\n".to_string();
+
+        for (index, op) in self.ops.iter().enumerate() {
+            let op_node = format!("op_{}", index);
+            let op_label = op.name();
+            s.push_str(&format!("    {}[\"{}\"]\n", op_node, op_label));
+
+            for ir in op.io() {
+                let tensor_node = format!("tensor_{}", ir.id);
+                let tensor_label = format!("{}", ir.id);
+
+                match ir.access {
+                    Access::ReadOnly => {
+                        s.push_str(&format!("    {}((\"{}\"))\n", tensor_node, tensor_label));
+                        s.push_str(&format!("    {} --> {}\n", tensor_node, op_node));
+                    }
+                    Access::WriteOnly => {
+                        s.push_str(&format!("    {}((\"{}\"))\n", tensor_node, tensor_label));
+                        s.push_str(&format!("    {} --> {}\n", op_node, tensor_node));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        s
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct InnerOp<const I: usize, const O: usize> {
     pub id: TensorOpId,
