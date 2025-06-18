@@ -7,7 +7,7 @@ use super::ops::{AddOp, CreateOp, LayerNormOp, SoftmaxOp};
 use crate::loom::{
     device::{Device, DeviceError, DeviceEvent},
     layout::IntoLayout,
-    num::{Float, Scalar},
+    num::{F16x4, Float, Scalar},
     ops::{Access, InnerOp, Mermaid, OneOp, TensorOp},
     tensor::Tensor,
 };
@@ -112,3 +112,6 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
         build_api_3(f, output, self, w, b)
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct MatrixFp16<D>(pub Tensor<D, F16x4>);
