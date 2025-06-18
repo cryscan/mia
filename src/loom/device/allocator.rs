@@ -157,6 +157,7 @@ impl Allocator {
         Ok(AllocOp { op, io })
     }
 
+    /// Retains only the specified tensor IDs and their dependencies in the allocator.
     pub fn retain(&mut self, retain: Vec<TensorId>) {
         let ids = retain.iter().map(|&id| self.redirect(id));
         let ids: HashSet<_> = retain.iter().copied().chain(ids).collect();
@@ -168,7 +169,8 @@ impl Allocator {
             .for_each(|v| v.retain(|id| ids.contains(id)));
     }
 
-    pub fn print_pretty(&mut self) -> String {
+    /// Prints the allocator's state in a human-readable format.
+    pub fn print_pretty(&self) -> String {
         let ids: HashSet<_> = self
             .alloc
             .keys()
@@ -177,15 +179,21 @@ impl Allocator {
             .collect();
         ids.into_iter()
             .map(|id| {
-                let dest = self.redirect(id);
+                let key = self.alloc.get(&id).unwrap_or(&id);
                 let stash = self
                     .stash
-                    .get(&dest)
+                    .get(key)
                     .copied()
                     .map_or(Default::default(), |id| id.to_string());
-                format!("{id}\t→ {dest}\t: {stash}")
+                format!("{id}\t→ {key}\t: {stash}")
             })
             .join("\n")
+    }
+}
+
+impl std::fmt::Display for Allocator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.print_pretty())
     }
 }
 

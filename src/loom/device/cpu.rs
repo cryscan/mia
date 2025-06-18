@@ -203,8 +203,8 @@ impl super::Backend for Backend {
         match self.buffers.get(&id) {
             Some(data) => data.clone(),
             None => {
-                let status = self.allocator().print_pretty();
-                panic!("{}", format!("failed to fetch buffer: {id}\n\n{status}\n"))
+                let allocator = self.allocator();
+                panic!("failed to fetch buffer: {id}\n\n{allocator}\n",)
             }
         }
     }
