@@ -10,11 +10,11 @@
 
 `mia` is a high-performance model inference framework designed for efficient execution of machine learning models across diverse hardware platforms. Built in Rust, it emphasizes type safety, memory efficiency, and cross-platform compatibility, supporting both native applications and web browsers via WebGPU.
 
-## 🚧 Design Philosophy
+## 💡 Design Philosophy
 
 Mia solves model deployment challenges through a dual-component architecture:
 
-### 1. Typed Frontend API
+### 1. ⚙️ Typed Frontend API
 The frontend leverages Rust's type system to enforce correctness at compile-time. Developers define computation graphs through declarative operations:
 
 ```rust
@@ -28,21 +28,21 @@ async fn test_add_f32x4() -> Result<(), Box<dyn Error>> {
     let reference: Box<[f32]> = data.iter().map(|x| x + x + x + x).collect();
 
     // create tensors with compile-time type enforcement
-    let a = Tensor::create(cpu.clone(), [C, T], data.clone())?.cast::<F32x4>([C / 4, T])?;
-    let b = Tensor::create(cpu.clone(), [C, T], data.clone())?.cast::<F32x4>([C / 4, T])?;
+    let a = Tensor::create(cpu.clone(), [C, T], data.clone()).cast::<F32x4>([C / 4, T]);
+    let b = Tensor::create(cpu.clone(), [C, T], data.clone()).cast::<F32x4>([C / 4, T]);
     
     // build computation graph through operator overloading
     let b = a.clone() + b;
     let d = a + b.clone() + c;
 
     // execution triggered explicitly
-    let output = d.cast::<f32>([C, T])?.back().await?;
+    let output = d.cast::<f32>([C, T]).back().await?;
     assert_eq!(output, reference);
 
     // only this addition will be executed here (no redundant computations)
     let d = b.clone() + b;
 
-    let output = d.cast::<f32>([C, T])?.back().await?;
+    let output = d.cast::<f32>([C, T]).back().await?;
     assert_eq!(output, reference);
 
     Ok(())
@@ -54,7 +54,7 @@ Key characteristics:
 - **Shape Awareness**: Runtime layout validation for operation compatibility
 - **Zero-Cost Abstraction**: Operations build computation graphs without immediate execution
 
-### 2. Lazy Evaluation with Tensor Tape
+### 2. 📼 Lazy Evaluation with Tensor Tape
 Computation is deferred until explicit `.back().await` call, enabled by the `Tensor` structure:
 
 ```rust
@@ -78,14 +78,14 @@ The `tape` serves as:
 - **Serialization Unit**: Encodes computation graphs for persistence/transfer
 - **Execution Trigger**: Converts to execution plan on `.back().await`
 
-### 3. Ownership-Driven Memory Reuse
+### 3. 👑 Ownership-Driven Memory Reuse
 Mia exploits Rust's ownership semantics:
 - Tensor operations consume inputs (`a + b` transfers ownership)
 - Backend inspects `tape` reference counts pre-execution
 - Zero-copy buffer reuse when reference counts allow
 - Eliminates need for manual memory management or GC
 
-### 4. Decoupled Backend Architecture
+### 4. 🏛️ Decoupled Backend Architecture
 ```mermaid
 graph LR
     Frontend -->|TensorTape| Device
@@ -102,7 +102,8 @@ graph LR
 - Platform-specific implementations (CPU/WebGPU)
 - Uniform execution interface across targets
 
-## Getting Started
+<!-- 
+## 🚀 Getting Started
 
 ```toml
 [dependencies]
@@ -111,14 +112,11 @@ mia = { git = "https://github.com/cryscan/mia" }
 
 ```rust
 //! Example: CPU-based vector addition
-```
+``` -->
 
-## Supported Operations
+## 🔨 Supported Operations
 | Category    | Ops                        | CPU | WebGPU |
 | ----------- | -------------------------- | --- | ------ |
-| Arithmetic  | `add`, `mul`, `matmul`     | ✅   | ⏳      |
+| Arithmetic  | `add`, `mul`, `matmul`     | ✅   | 🚧      |
 | Tensor      | `reshape`, `slice`, `cast` | ✅   | ✅      |
-| Activations | `relu`, `gelu`, `softmax`  | ⏳   | ⏳      |
-
-✅ = Implemented  
-⏳ = In Progress
+| Activations | `relu`, `gelu`, `softmax`  | 🚧   | 🚧      |
