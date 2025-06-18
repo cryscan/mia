@@ -53,9 +53,14 @@ where
 pub async fn handle<F, R>(f: F) -> R
 where
     F: FnOnce() -> R + 'static,
-    R: 'static,
+    R: Send + 'static,
 {
-    f()
+    let (sender, receiver) = flume::bounded(0);
+    wasm_bindgen_futures::spawn_local(async move { _ = sender.send_async(f()).await });
+    receiver
+        .recv_async()
+        .await
+        .expect("failed to receive remote task result")
 }
 
 #[cfg(not(target_arch = "wasm32"))]
