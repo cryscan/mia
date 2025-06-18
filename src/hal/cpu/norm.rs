@@ -387,7 +387,7 @@ mod tests {
             .map(|_| fastrand::f32())
             .map(f16::from_f32)
             .collect();
-        let a = Tensor::create(cpu.clone(), [C, T], data.clone());
+        let a = Tensor::create(cpu.clone(), [C, T], data.clone())?;
         let a = a.softmax();
 
         let output = a.back().await?;
@@ -416,7 +416,7 @@ mod tests {
         }
 
         let data: Arc<_> = (0..C).map(|_| fastrand::f32()).map(f16::from_f32).collect();
-        let a = Tensor::create(cpu.clone(), [C], data.clone());
+        let a = Tensor::create(cpu.clone(), [C], data.clone())?;
         let a = a.softmax();
 
         let output = a.back().await?;
@@ -453,7 +453,7 @@ mod tests {
         const T: usize = 768;
 
         let data: Arc<_> = (0..C * T).map(|_| fastrand::f32()).collect();
-        let a = Tensor::create(cpu.clone(), [C, T], data.clone());
+        let a = Tensor::create(cpu.clone(), [C, T], data.clone())?;
         let a = a.softmax();
 
         let output = a.back().await?;
@@ -475,7 +475,7 @@ mod tests {
         }
 
         let data: Arc<_> = (0..C).map(|_| fastrand::f32()).collect();
-        let a = Tensor::create(cpu.clone(), [C], data.clone());
+        let a = Tensor::create(cpu.clone(), [C], data.clone())?;
         let a = a.softmax();
 
         let output = a.back().await?;
@@ -505,15 +505,15 @@ mod tests {
         const C: usize = 128;
 
         let x_data: Arc<_> = (0..N * C).map(|_| f16::from_f32(fastrand::f32())).collect();
-        let x = Tensor::create(cpu.clone(), [C, N], x_data.clone());
+        let x = Tensor::create(cpu.clone(), [C, N], x_data.clone())?;
 
         let w_data: Arc<_> = (0..C).map(|_| f16::from_f32(fastrand::f32())).collect();
         let b_data: Arc<_> = (0..C).map(|_| f16::from_f32(fastrand::f32())).collect();
 
-        let w = Tensor::create(cpu.clone(), [C], w_data.clone());
-        let b = Tensor::create(cpu.clone(), [C], b_data.clone());
+        let w = Tensor::create(cpu.clone(), [C], w_data.clone())?;
+        let b = Tensor::create(cpu.clone(), [C], b_data.clone())?;
 
-        let y = x.layer_norm(w, b, 1e-5);
+        let y = x.layer_norm(w, b, 1e-5)?;
         let output = y.back().await?;
 
         let mut r#ref = Vec::with_capacity(N * C);
@@ -557,15 +557,15 @@ mod tests {
         const EPS: f32 = 1.0e-5;
 
         let x_data: Arc<_> = (0..N * C).map(|_| fastrand::f32()).collect();
-        let x = Tensor::create(cpu.clone(), [C, N], x_data.clone());
+        let x = Tensor::create(cpu.clone(), [C, N], x_data.clone())?;
 
         let w_data: Arc<_> = (0..C).map(|_| f16::from_f32(fastrand::f32())).collect();
         let b_data: Arc<_> = (0..C).map(|_| f16::from_f32(fastrand::f32())).collect();
 
-        let w = Tensor::create(cpu.clone(), [C], w_data.clone());
-        let b = Tensor::create(cpu.clone(), [C], b_data.clone());
+        let w = Tensor::create(cpu.clone(), [C], w_data.clone())?;
+        let b = Tensor::create(cpu.clone(), [C], b_data.clone())?;
 
-        let y = x.layer_norm(w, b, EPS);
+        let y = x.layer_norm(w, b, EPS)?;
         let output = y.back().await?;
 
         let mut r#ref = Vec::with_capacity(N * C);

@@ -9,7 +9,7 @@ use crate::loom::{
     layout::IntoLayout,
     num::{F16x4, Float, Scalar},
     ops::{Access, InnerOp, Mermaid, OneOp, TensorOp},
-    tensor::Tensor,
+    tensor::{Tensor, TensorError},
 };
 
 build_api!(1);
@@ -24,7 +24,7 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
     }
 
     /// Create a new tensor with the given device, layout, and contents.
-    pub fn create<L, C>(device: D, layout: L, contents: C) -> Self
+    pub fn create<L, C>(device: D, layout: L, contents: C) -> Result<Self, TensorError>
     where
         L: IntoLayout,
         C: Into<Arc<[T]>>,
@@ -33,13 +33,13 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
         let contents: Arc<[T]> = contents.into();
         let size = contents.len() * size_of::<T>();
 
-        let mut output = Tensor::<D, T>::zeros(device, layout, size);
+        let mut output = Tensor::<D, T>::zeros(device, layout, size)?;
         let op = InnerOp::new([], [output.ir(Access::WriteOnly)]);
         let op = CreateOp { op, contents };
         let ops: Vec<Box<dyn TensorOp>> = vec![Box::new(op)];
         output.replace_ops(ops);
 
-        output
+        Ok(output)
     }
 
     /// Generate a Mermaid diagram representation of the tensor's computation graph.
@@ -82,11 +82,19 @@ impl<D: Device + Clone, T: Scalar> std::ops::Add<Tensor<D, T>> for Tensor<D, T> 
     type Output = Tensor<D, T>;
 
     fn add(self, rhs: Tensor<D, T>) -> Self::Output {
-        assert_eq!(self.layout(), rhs.layout(), "tensor layouts must match");
+        self.try_add(rhs).expect("tensor layouts must match")
+    }
+}
+
+impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
+    #[inline]
+    pub fn try_add(self, rhs: Tensor<D, T>) -> Result<Self, TensorError> {
+        let layout = self.layout();
+        let lhs = self.check_layout(layout)?;
         let phantom = PhantomData;
         let f = move |op| AddOp::<T> { op, phantom };
-        let output = Tensor::zeros_like(&self);
-        build_api_2(f, output, self, rhs)
+        let output = Tensor::zeros_like(&lhs);
+        Ok(build_api_2(f, output, lhs, rhs))
     }
 }
 
@@ -100,16 +108,20 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
     }
 
     #[inline]
-    pub fn layer_norm(self, w: Tensor<D, f16>, b: Tensor<D, f16>, eps: f32) -> Self {
+    pub fn layer_norm(
+        self,
+        w: Tensor<D, f16>,
+        b: Tensor<D, f16>,
+        eps: f32,
+    ) -> Result<Self, TensorError> {
         let layout = self.layout();
-        let shape = [layout.shape_of(0)].into();
-        assert_eq!(w.layout().shape(), shape, "weight must match input shape");
-        assert_eq!(b.layout().shape(), shape, "bias must match input shape");
+        let w = w.check_layout_len(1)?.check_shape(layout.shape_of(0))?;
+        let b = b.check_layout_len(1)?.check_shape(layout.shape_of(0))?;
 
         let phantom = PhantomData;
         let f = |op| LayerNormOp::<T> { op, eps, phantom };
         let output = Tensor::zeros_like(&self);
-        build_api_3(f, output, self, w, b)
+        Ok(build_api_3(f, output, self, w, b))
     }
 }
 

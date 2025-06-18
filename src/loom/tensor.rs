@@ -1,15 +1,59 @@
 use std::{marker::PhantomData, sync::Arc};
 
 use derive_more::Display;
+use thiserror::Error;
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use super::{
     device::Device,
-    layout::{IntoLayout, Layout},
+    layout::{IntoLayout, Layout, LayoutError, Shape},
     num::Scalar,
     ops::{Access, TensorIr, TensorOp, TensorTape, ZeroOp},
 };
+
+#[derive(Debug, Error)]
+pub enum TensorErrorKind {
+    #[error("unmatched layout lengths: expected {expected}, found {found}")]
+    UnmatchedLayoutLengths { expected: usize, found: usize },
+    #[error("incompatible layouts: expected {expected}, found {found}")]
+    IncompatibleLayouts { expected: Layout, found: Layout },
+    #[error("incompatible shapes: expected {expected}, found {found}")]
+    IncompatibleShapes { expected: Shape, found: Shape },
+    #[error("insufficient buffer size: required {required} bytes, available {available} bytes")]
+    InsufficientBufferSize { required: usize, available: usize },
+    #[error("unaligned data type: expected {expected}, found {found}")]
+    UnalignedDataType { expected: usize, found: usize },
+    #[error("unique tape required but found multiple references")]
+    NonUniqueTape,
+    #[error("layout error: {0}")]
+    Layout(#[from] LayoutError),
+}
+
+#[derive(Debug, Display)]
+#[display("{error}\n\nBacktrace:\n{backtrace}")]
+pub struct TensorError {
+    pub error: TensorErrorKind,
+    pub backtrace: std::backtrace::Backtrace,
+}
+
+impl From<TensorErrorKind> for TensorError {
+    fn from(error: TensorErrorKind) -> Self {
+        let backtrace = std::backtrace::Backtrace::capture();
+        Self { error, backtrace }
+    }
+}
+
+impl std::error::Error for TensorError {
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        Some(&self.error)
+    }
+
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
 
 #[derive(Debug, Default, Display, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -59,13 +103,21 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
         &self.tape
     }
 
+    /// Returns a mutable reference to the tensor tape. Returns error if the tape is not unique.
+    #[inline]
+    pub fn try_tape_mut(&mut self) -> Result<&mut TensorTape, TensorError> {
+        Arc::get_mut(&mut self.tape)
+            .ok_or(TensorErrorKind::NonUniqueTape)
+            .map_err(Into::into)
+    }
+
     /// Returns a mutable reference to the tensor tape.
     ///
     /// ## Panics
     /// This method will panic if the tape is not unique, meaning that there are other references to the same tape.
     #[inline]
     pub fn tape_mut(&mut self) -> &mut TensorTape {
-        Arc::get_mut(&mut self.tape).expect("tape is not unique")
+        self.try_tape_mut().expect("tape is not unique")
     }
 
     /// Returns the element count of the tensor.
@@ -93,26 +145,16 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
     }
 
     /// Reshape the tensor, leaving the underlying data untouched.
-    ///
-    /// ## Panics
-    /// This method will panic if the new layout's data size is greater than the buffer size.
     #[inline]
-    pub fn reshape(mut self, layout: impl IntoLayout) -> Self {
+    pub fn reshape(mut self, layout: impl IntoLayout) -> Result<Self, TensorError> {
         let layout = layout.into_layout();
         self.layout = layout;
-        assert!(
-            self.data_size() <= self.buffer_size(),
-            "data size must be less than or equal to buffer size"
-        );
-        self
+        self.check_size().map_err(Into::into)
     }
 
     /// Re-interpret the tensor as one of another type, leaving the underlying data untouched.
-    ///
-    /// ## Panics
-    /// This method will panic if the new tensor's data size is greater than the buffer size.
     #[inline]
-    pub fn cast<U: Scalar>(self, layout: impl IntoLayout) -> Tensor<D, U> {
+    pub fn cast<U: Scalar>(self, layout: impl IntoLayout) -> Result<Tensor<D, U>, TensorError> {
         let layout = layout.into_layout();
         let device = self.device;
         let id = self.id;
@@ -127,21 +169,83 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
             tape,
             phantom,
         };
-        assert!(
-            output.data_size() <= output.buffer_size(),
-            "data size must be less than or equal to buffer size"
-        );
-        output
+        output.check_size()?.check_align::<U>().map_err(Into::into)
+    }
+}
+
+impl<D: Device, T: Scalar> Tensor<D, T> {
+    /// Checks if the data types have exact the same alignment.
+    #[inline]
+    pub fn check_align<U: Scalar>(self) -> Result<Self, TensorErrorKind> {
+        let expected = align_of::<T>();
+        let found = align_of::<U>();
+        let err = || TensorErrorKind::UnalignedDataType { expected, found };
+        (expected == found).then_some(self).ok_or_else(err)
+    }
+
+    /// Checks if `self` has enough buffer size available.
+    #[inline]
+    pub fn check_size(self) -> Result<Self, TensorErrorKind> {
+        let required = self.data_size();
+        let available = self.buffer_size();
+        let err = || TensorErrorKind::InsufficientBufferSize {
+            required,
+            available,
+        };
+        (required <= available).then_some(self).ok_or_else(err)
+    }
+
+    /// Checks if the layout's length matches the reference.
+    #[inline]
+    pub fn check_layout_len(self, expected: usize) -> Result<Self, TensorErrorKind> {
+        let found = self.layout.len();
+        let err = || TensorErrorKind::UnalignedDataType { expected, found };
+        (expected == found).then_some(self).ok_or_else(err)
+    }
+
+    /// Checks if the layout of `self` matches the reference. Skips 0 modes.
+    #[inline]
+    pub fn check_layout(self, r#ref: impl Into<Layout>) -> Result<Self, TensorErrorKind> {
+        let shape = self.layout();
+        let r#ref: Layout = r#ref.into();
+        let err = {
+            let expected = r#ref.clone();
+            let found = shape.clone();
+            || TensorErrorKind::IncompatibleLayouts { expected, found }
+        };
+        shape
+            .iter()
+            .zip(r#ref.iter())
+            .filter(|(_, (x, _))| *x != 0)
+            .all(|(x, y)| x == y)
+            .then_some(self)
+            .ok_or_else(err)
+    }
+
+    /// Checks if the shape of `self` matches the reference. Skips 0 modes.
+    #[inline]
+    pub fn check_shape(self, r#ref: impl Into<Shape>) -> Result<Self, TensorErrorKind> {
+        let shape = self.layout.shape();
+        let r#ref: Shape = r#ref.into();
+        let err = {
+            let expected = r#ref.clone();
+            let found = shape.clone();
+            || TensorErrorKind::IncompatibleShapes { expected, found }
+        };
+        shape
+            .iter()
+            .zip(r#ref.iter())
+            .filter(|(_, x)| **x != 0)
+            .all(|(x, y)| x == y)
+            .then_some(self)
+            .ok_or_else(err)
     }
 }
 
 impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
     /// Create a tensor of zeros.
-    ///
-    /// # Panics
-    /// This method will panic if the data size is greater than the buffer size.
     #[inline]
-    pub fn zeros(device: D, layout: impl IntoLayout, size: usize) -> Self {
+    pub fn zeros(device: D, layout: impl IntoLayout, size: usize) -> Result<Self, TensorError> {
         let layout = layout.into_layout();
         let id = TensorId(uuid::Uuid::new_v4());
         let ir = unsafe { TensorIr::unique::<T>(id, layout.clone(), Access::WriteOnly) };
@@ -156,11 +260,7 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
             tape,
             phantom,
         };
-        assert!(
-            output.data_size() <= output.buffer_size(),
-            "zeros requires the data size to be less than or equal to the buffer size"
-        );
-        output
+        output.check_size().map_err(Into::into)
     }
 
     /// Create a tensor of zeros from current device and layout.

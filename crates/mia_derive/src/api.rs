@@ -29,6 +29,7 @@ pub fn build_api(input: LitInt) -> TokenStream {
     let fn_name = syn::Ident::new(&format!("build_api_{}", n), proc_macro2::Span::call_site());
 
     quote! {
+        #[allow(unused)]
         pub fn #fn_name<D, U, Op, F>(
             f: F,
             mut output: Tensor<D, U>,
