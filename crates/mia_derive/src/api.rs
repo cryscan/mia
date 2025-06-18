@@ -31,6 +31,7 @@ pub fn build_api(input: LitInt) -> TokenStream {
     quote! {
         pub fn #fn_name<D, U, Op, F>(
             f: F,
+            mut output: Tensor<D, U>,
             #(#tensor_params: Tensor<D, impl Scalar>),*
         ) -> Tensor<D, U>
         where
@@ -38,7 +39,6 @@ pub fn build_api(input: LitInt) -> TokenStream {
         {
             use ::itertools::Itertools;
 
-            let mut output = Tensor::zeros_like(&t0);
             let mut ops = vec![#(#tape_clones),*]
                 .concat()
                 .into_iter()

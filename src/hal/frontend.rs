@@ -70,7 +70,9 @@ impl<D: Device + Clone, T: Scalar> std::ops::Add<Tensor<D, T>> for Tensor<D, T> 
     fn add(self, rhs: Tensor<D, T>) -> Self::Output {
         assert_eq!(self.layout(), rhs.layout(), "tensor layouts must match");
         let phantom = PhantomData;
-        build_api_2(move |op| AddOp::<T> { op, phantom }, self, rhs)
+        let f = move |op| AddOp::<T> { op, phantom };
+        let output = Tensor::zeros_like(&self);
+        build_api_2(f, output, self, rhs)
     }
 }
 
@@ -78,7 +80,9 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
     #[inline]
     pub fn softmax(self) -> Self {
         let phantom = PhantomData;
-        build_api_1(move |op| SoftmaxOp::<T> { op, phantom }, self)
+        let f = move |op| SoftmaxOp::<T> { op, phantom };
+        let output = Tensor::zeros_like(&self);
+        build_api_1(f, output, self)
     }
 
     #[inline]
@@ -89,6 +93,8 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
         assert_eq!(b.layout().shape(), shape, "bias must match input shape");
 
         let phantom = PhantomData;
-        build_api_3(move |op| LayerNormOp::<T> { op, eps, phantom }, self, w, b)
+        let f = |op| LayerNormOp::<T> { op, eps, phantom };
+        let output = Tensor::zeros_like(&self);
+        build_api_3(f, output, self, w, b)
     }
 }
