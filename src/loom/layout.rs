@@ -9,12 +9,14 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Error)]
 pub enum LayoutError {
-    #[error("complement error: layout {0} vs. size {1}")]
+    #[error("complement error: layout {0} is not complementable by {1}")]
     Complement(Layout, usize),
     #[error("shape {0} is not left divisible by {1}")]
     ShapeDiv(Shape, usize),
     #[error("layout {0} is not disjoint")]
     Disjoint(Layout),
+    #[error("shape length mismatch: expected {expected}, but got {actual}")]
+    Length { expected: usize, actual: usize },
 }
 
 /// An [`IndexFunction`] is a mapping that maps an index to another.
@@ -32,7 +34,7 @@ pub trait Compose<F> {
     fn compose(&self, f: F) -> Self::Output;
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into, Display)]
+#[derive(Debug, Display, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[display("{_0:?}")]
 pub struct Shape(Arc<[usize]>);
@@ -65,6 +67,26 @@ impl AsRef<Shape> for Shape {
 }
 
 impl Shape {
+    /// Converts the shape into a fixed-size array of exact length.
+    #[inline]
+    pub fn to_array_exact<const N: usize>(&self) -> Result<[usize; N], LayoutError> {
+        let expected = N;
+        let actual = self.len();
+        let err = |_| LayoutError::Length { expected, actual };
+        self.to_vec().try_into().map_err(err)
+    }
+
+    /// Converts the shape into a fixed-size array.
+    ///   - If `self.len() > N`, the result will be truncated to `N`;
+    ///   - If `self.len() < N`, the result will be padded by ones.
+    #[inline]
+    pub fn to_array<const N: usize>(&self) -> [usize; N] {
+        let mut array = [1; N];
+        let len = self.len().min(N);
+        array[..len].copy_from_slice(&self[..len]);
+        array
+    }
+
     #[inline]
     pub fn from_slice(slice: &[usize]) -> Self {
         Self(slice.into())
@@ -198,7 +220,7 @@ impl Shape {
 }
 
 /// Defines the step to add to when increase 1 along coordinates.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into, Display)]
+#[derive(Debug, Display, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[display("{_0:?}")]
 pub struct Stride(Arc<[usize]>);
@@ -231,6 +253,26 @@ impl AsRef<Stride> for Stride {
 }
 
 impl Stride {
+    /// Converts the stride into a fixed-size array of exact length.
+    #[inline]
+    pub fn to_array_exact<const N: usize>(&self) -> Result<[usize; N], LayoutError> {
+        let expected = N;
+        let actual = self.len();
+        let err = |_| LayoutError::Length { expected, actual };
+        self.to_vec().try_into().map_err(err)
+    }
+
+    /// Converts the stride into a fixed-size array.
+    ///   - If `self.len() > N`, the result will be truncated to `N`;
+    ///   - If `self.len() < N`, the result will be padded by zeros.
+    #[inline]
+    pub fn to_array<const N: usize>(&self) -> [usize; N] {
+        let mut array = [0; N];
+        let len = self.len().min(N);
+        array[..len].copy_from_slice(&self[..len]);
+        array
+    }
+
     #[inline]
     pub fn from_slice(slice: &[usize]) -> Self {
         Self(slice.into())
@@ -271,6 +313,26 @@ impl AsRef<Coord> for Coord {
 }
 
 impl Coord {
+    /// Converts the coord into a fixed-size array of exact length.
+    #[inline]
+    pub fn to_array_exact<const N: usize>(&self) -> Result<[usize; N], LayoutError> {
+        let expected = N;
+        let actual = self.len();
+        let err = |_| LayoutError::Length { expected, actual };
+        self.to_vec().try_into().map_err(err)
+    }
+
+    /// Converts the coord into a fixed-size array.
+    ///   - If `self.len() > N`, the result will be truncated to `N`;
+    ///   - If `self.len() < N`, the result will be padded by zeros.
+    #[inline]
+    pub fn to_array<const N: usize>(&self) -> [usize; N] {
+        let mut array = [0; N];
+        let len = self.len().min(N);
+        array[..len].copy_from_slice(&self[..len]);
+        array
+    }
+
     #[inline]
     pub fn from_slice(slice: &[usize]) -> Self {
         Self(slice.into())
@@ -293,7 +355,7 @@ impl Coord {
 /// For more information, check:
 /// 1. [CuTe documents](https://github.com/NVIDIA/cutlass/blob/main/media/docs/cute);
 /// 2. [A note on the algebra of CuTe Layouts](https://leimao.github.io/downloads/article/2024-10-20-CuTe-Layout-Algebra/layout_algebra.pdf).
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into, Display)]
+#[derive(Debug, Display, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[display("<{}, {}>", self.shape(), self.stride())]
 pub struct Layout(Arc<[(usize, usize)]>);
@@ -378,6 +440,26 @@ impl Layout {
         let shape: Shape = shape.into();
         let stride: Stride = stride.into();
         Self(shape.iter().copied().zip_eq(stride.to_vec()).collect())
+    }
+
+    /// Converts the layout into a fixed-size array of exact length.
+    #[inline]
+    pub fn to_array_exact<const N: usize>(&self) -> Result<[(usize, usize); N], LayoutError> {
+        let expected = N;
+        let actual = self.len();
+        let err = |_| LayoutError::Length { expected, actual };
+        self.to_vec().try_into().map_err(err)
+    }
+
+    /// Converts the layout into a fixed-size array.
+    ///   - If `self.len() > N`, the result will be truncated to `N`;
+    ///   - If `self.len() < N`, the result will be padded by ones.
+    #[inline]
+    pub fn to_array<const N: usize>(&self) -> [(usize, usize); N] {
+        let mut array = [(1, 0); N];
+        let len = self.len().min(N);
+        array[..len].copy_from_slice(&self[..len]);
+        array
     }
 
     /// Retrieves the shape of the layout.
@@ -935,6 +1017,8 @@ mod tests {
         check(Layout::from_shape([2, 4]));
         check(Layout::from_shape([2, 4, 6]));
         check(Layout::from_shape([2, 4, 6, 2]));
+
+        check(Layout::from_shape_stride([2, 4], [4, 1]));
 
         check(Layout::from_shape_stride([2, 1, 6], [1, 6, 2]));
         check(Layout::from_shape_stride([2, 1, 6], [1, 7, 2]));

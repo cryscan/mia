@@ -15,16 +15,16 @@ use super::{
 
 #[derive(Debug, Error)]
 pub enum TensorErrorKind {
-    #[error("unmatched layout lengths: found {found}")]
-    UnexpectedLayoutLen { found: usize },
-    #[error("incompatible layouts: expected {expected}, found {found}")]
-    IncompatibleLayouts { expected: Layout, found: Layout },
-    #[error("incompatible shapes: expected {expected}, found {found}")]
-    IncompatibleShapes { expected: Shape, found: Shape },
+    #[error("unmatched layout: {0}")]
+    UnexpectedLayout(Layout),
+    #[error("incompatible layouts: expected {expected}, found {actual}")]
+    IncompatibleLayouts { expected: Layout, actual: Layout },
+    #[error("incompatible shapes: expected {expected}, found {actual}")]
+    IncompatibleShapes { expected: Shape, actual: Shape },
     #[error("insufficient buffer size: required {required} bytes, available {available} bytes")]
     InsufficientBufferSize { required: usize, available: usize },
-    #[error("unaligned data type: expected {expected}, found {found}")]
-    UnalignedDataType { expected: usize, found: usize },
+    #[error("unaligned data type: expected {expected}, found {actual}")]
+    UnalignedDataType { expected: usize, actual: usize },
     #[error("unique tape required but found multiple references")]
     NonUniqueTape,
     #[error("layout error: {0}")]
@@ -42,6 +42,12 @@ impl From<TensorErrorKind> for TensorError {
     fn from(error: TensorErrorKind) -> Self {
         let backtrace = std::backtrace::Backtrace::capture();
         Self { error, backtrace }
+    }
+}
+
+impl From<LayoutError> for TensorError {
+    fn from(error: LayoutError) -> Self {
+        TensorErrorKind::from(error).into()
     }
 }
 
@@ -178,9 +184,9 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
     #[inline]
     pub fn check_align<U: Scalar>(self) -> Result<Self, TensorErrorKind> {
         let expected = align_of::<T>();
-        let found = align_of::<U>();
-        let err = || TensorErrorKind::UnalignedDataType { expected, found };
-        (expected == found).then_some(self).ok_or_else(err)
+        let actual = align_of::<U>();
+        let err = || TensorErrorKind::UnalignedDataType { expected, actual };
+        (expected == actual).then_some(self).ok_or_else(err)
     }
 
     /// Checks if `self` has enough buffer size available.
@@ -201,20 +207,21 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
     where
         R: std::ops::RangeBounds<usize>,
     {
-        let found = self.layout.len();
-        let err = || TensorErrorKind::UnexpectedLayoutLen { found };
-        (expected.contains(&found)).then_some(self).ok_or_else(err)
+        let len = self.layout.len();
+        let layout = self.layout();
+        let err = || TensorErrorKind::UnexpectedLayout(layout);
+        (expected.contains(&len)).then_some(self).ok_or_else(err)
     }
 
     /// Checks if the layout of `self` matches the reference. Skips 0-sized modes.
     #[inline]
-    pub fn check_layout(self, r#ref: impl Into<Layout>) -> Result<Self, TensorErrorKind> {
+    pub fn check_layout(self, r#ref: impl IntoLayout) -> Result<Self, TensorErrorKind> {
         let layout = self.layout();
-        let r#ref: Layout = r#ref.into();
+        let r#ref = r#ref.into_layout();
         let err = {
             let expected = r#ref.clone();
-            let found = layout.clone();
-            || TensorErrorKind::IncompatibleLayouts { expected, found }
+            let actual = layout.clone();
+            || TensorErrorKind::IncompatibleLayouts { expected, actual }
         };
         layout
             .iter()
@@ -232,8 +239,8 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
         let r#ref: Shape = r#ref.into();
         let err = {
             let expected = r#ref.clone();
-            let found = shape.clone();
-            || TensorErrorKind::IncompatibleShapes { expected, found }
+            let actual = shape.clone();
+            || TensorErrorKind::IncompatibleShapes { expected, actual }
         };
         shape
             .iter()
@@ -246,38 +253,18 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
 }
 
 impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
-    /// Create a tensor of zeros.
+    /// Create a tensor with the given device, layout, and buffer size.
     #[inline]
-    pub fn zeros(device: D, layout: impl IntoLayout, size: usize) -> Result<Self, TensorError> {
+    pub fn init(device: D, layout: impl IntoLayout, size: usize) -> Result<Self, TensorError> {
         let layout = layout.into_layout();
         let id = TensorId(uuid::Uuid::new_v4());
+
         let ir = unsafe { TensorIr::unique::<T>(id, layout.clone(), Access::WriteOnly) };
         let ops: Vec<Box<dyn TensorOp>> = vec![Box::new(ZeroOp::new(ir))];
         let tape = Arc::new(TensorTape { id, ops });
-        let phantom = PhantomData;
-        let output = Self {
-            device,
-            layout,
-            id,
-            size,
-            tape,
-            phantom,
-        };
-        output.check_size().map_err(Into::into)
-    }
 
-    /// Create a tensor of zeros from current device and layout.
-    #[inline]
-    pub fn zeros_like<U: Scalar>(&self) -> Tensor<D, U> {
-        let device = self.device.clone();
-        let layout = self.layout();
-        let id = TensorId(uuid::Uuid::new_v4());
-        let size = layout.co_size() * size_of::<U>();
-        let ir = unsafe { TensorIr::unique::<U>(id, layout.clone(), Access::WriteOnly) };
-        let ops: Vec<Box<dyn TensorOp>> = vec![Box::new(ZeroOp::new(ir))];
-        let tape = Arc::new(TensorTape { id, ops });
         let phantom = PhantomData;
-        Tensor {
+        Self {
             device,
             layout,
             id,
@@ -285,5 +272,23 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
             tape,
             phantom,
         }
+        .check_size()
+        .map_err(Into::into)
+    }
+
+    /// Create a tensor with the given device, layout, and buffer size.
+    #[inline]
+    pub fn zeros(device: D, layout: impl IntoLayout) -> Self {
+        let layout = layout.into_layout();
+        let size = layout.co_size() * size_of::<T>();
+        Self::init(device, layout, size).expect("failed to initialize tensor")
+    }
+
+    /// Create a tensor of zeros from current device and layout with minimum buffer size.
+    #[inline]
+    pub fn zeros_like<U: Scalar>(&self) -> Tensor<D, U> {
+        let device = self.device.clone();
+        let layout = self.layout();
+        Tensor::zeros(device, layout)
     }
 }

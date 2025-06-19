@@ -1,9 +1,10 @@
 use std::{marker::PhantomData, sync::Arc};
 
+use derive_more::{Deref, DerefMut};
 use half::f16;
 use mia_derive::build_api;
 
-use super::ops::{AddOp, CreateOp, LayerNormOp, SoftmaxOp};
+use super::ops::{AddOp, CreateOp, LayerNormOp, MatMulFp16Op, SoftmaxOp};
 use crate::loom::{
     device::{Device, DeviceError, DeviceEvent},
     layout::IntoLayout,
@@ -31,9 +32,9 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
     {
         let layout = layout.into_layout();
         let contents: Arc<[T]> = contents.into();
-        let size = contents.len() * size_of::<T>();
+        let size = size_of_val(&contents);
 
-        let mut output = Tensor::<D, T>::zeros(device, layout, size)?;
+        let mut output = Tensor::<D, T>::init(device, layout, size)?;
         let op = InnerOp::new([], [output.ir(Access::WriteOnly)]);
         let op = CreateOp { op, contents };
         let ops: Vec<Box<dyn TensorOp>> = vec![Box::new(op)];
@@ -90,11 +91,12 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
     #[inline]
     pub fn try_add(self, rhs: Tensor<D, T>) -> Result<Self, TensorError> {
         let layout = self.layout();
-        let lhs = self.check_layout(layout)?;
-        let phantom = PhantomData;
-        let f = move |op| AddOp::<T> { op, phantom };
-        let output = Tensor::zeros_like(&lhs);
-        Ok(build_api_2(f, output, lhs, rhs))
+        let rhs = rhs.check_layout(layout)?;
+
+        let phantom = PhantomData::<T>;
+        let f = move |op| AddOp { op, phantom };
+        let output = Tensor::zeros_like(&self);
+        Ok(build_api_2(f, output, self, rhs))
     }
 }
 
@@ -118,12 +120,34 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
         let w = w.check_layout_len(1..=1)?.check_shape(layout.shape_of(0))?;
         let b = b.check_layout_len(1..=1)?.check_shape(layout.shape_of(0))?;
 
-        let phantom = PhantomData;
-        let f = |op| LayerNormOp::<T> { op, eps, phantom };
+        let phantom = PhantomData::<T>;
+        let f = |op| LayerNormOp { op, eps, phantom };
         let output = Tensor::zeros_like(&self);
         Ok(build_api_3(f, output, self, w, b))
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deref, DerefMut)]
 pub struct MatrixFp16<D>(pub Tensor<D, F16x4>);
+
+impl<D: Device + Clone> MatrixFp16<D> {
+    #[inline]
+    pub fn from_tensor<T: Scalar>(tensor: Tensor<D, T>) -> Result<Self, TensorError> {
+        let [m, n, b] = tensor.layout().pad_to(3).shape().to_array_exact()?;
+        let tensor = tensor.check_layout([m, n, b])?;
+        let tensor = tensor.cast([m * T::DATA_TYPE.count() / 4, n, b])?;
+        Ok(Self(tensor))
+    }
+
+    #[inline]
+    pub fn matmul<T: Float>(self, rhs: Tensor<D, T>) -> Result<Tensor<D, T>, TensorError> {
+        let [m, k, b] = self.layout().shape().to_array_exact()?;
+        let [n, _, _] = rhs.layout().shape().to_array_exact()?;
+        let rhs = rhs.check_layout([n, k, b])?;
+
+        let phantom = PhantomData::<T>;
+        let f = |op| MatMulFp16Op { op, phantom };
+        let output = Tensor::zeros(self.device().clone(), [m, n, b]);
+        Ok(build_api_2(f, output, self.0, rhs))
+    }
+}
