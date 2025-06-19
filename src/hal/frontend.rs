@@ -32,7 +32,7 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
     {
         let layout = layout.into_layout();
         let contents: Arc<[T]> = contents.into();
-        let size = size_of_val(&contents);
+        let size = size_of_val(&contents[..]);
 
         let mut output = Tensor::<D, T>::init(device, layout, size)?;
         let op = InnerOp::new([], [output.ir(Access::WriteOnly)]);
@@ -116,9 +116,9 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
         b: Tensor<D, f16>,
         eps: f32,
     ) -> Result<Self, TensorError> {
-        let layout = self.layout();
-        let w = w.check_layout_len(1..=1)?.check_shape(layout.shape_of(0))?;
-        let b = b.check_layout_len(1..=1)?.check_shape(layout.shape_of(0))?;
+        let [x] = self.layout().shape().to_array();
+        let w = w.check_dim(1..=1)?.check_shape(x)?;
+        let b = b.check_dim(1..=1)?.check_shape(x)?;
 
         let phantom = PhantomData::<T>;
         let f = |op| LayerNormOp { op, eps, phantom };

@@ -201,9 +201,9 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
         (required <= available).then_some(self).ok_or_else(err)
     }
 
-    /// Checks if the layout's length is in the given range.
+    /// Checks if the tensor's dimension is in the given range.
     #[inline]
-    pub fn check_layout_len<R>(self, expected: R) -> Result<Self, TensorErrorKind>
+    pub fn check_dim<R>(self, expected: R) -> Result<Self, TensorErrorKind>
     where
         R: std::ops::RangeBounds<usize>,
     {

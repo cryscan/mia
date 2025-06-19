@@ -29,7 +29,7 @@ pub struct Buffer {
 
 impl<T: Scalar> From<Box<[T]>> for Buffer {
     fn from(value: Box<[T]>) -> Self {
-        let size = size_of_val(&value);
+        let size = size_of_val(&value[..]);
         let ptr = Box::leak(value) as *mut [T] as *mut u8;
         let boxed = unsafe {
             // SAFETY: The pointer must be valid and aligned for `u8` and must not be null.
