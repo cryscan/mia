@@ -15,8 +15,8 @@ use super::{
 
 #[derive(Debug, Error)]
 pub enum TensorErrorKind {
-    #[error("unmatched layout lengths: expected {expected}, found {found}")]
-    UnmatchedLayoutLengths { expected: usize, found: usize },
+    #[error("unmatched layout lengths: found {found}")]
+    UnexpectedLayoutLen { found: usize },
     #[error("incompatible layouts: expected {expected}, found {found}")]
     IncompatibleLayouts { expected: Layout, found: Layout },
     #[error("incompatible shapes: expected {expected}, found {found}")]
@@ -195,25 +195,28 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
         (required <= available).then_some(self).ok_or_else(err)
     }
 
-    /// Checks if the layout's length matches the reference.
+    /// Checks if the layout's length is in the given range.
     #[inline]
-    pub fn check_layout_len(self, expected: usize) -> Result<Self, TensorErrorKind> {
+    pub fn check_layout_len<R>(self, expected: R) -> Result<Self, TensorErrorKind>
+    where
+        R: std::ops::RangeBounds<usize>,
+    {
         let found = self.layout.len();
-        let err = || TensorErrorKind::UnalignedDataType { expected, found };
-        (expected == found).then_some(self).ok_or_else(err)
+        let err = || TensorErrorKind::UnexpectedLayoutLen { found };
+        (expected.contains(&found)).then_some(self).ok_or_else(err)
     }
 
-    /// Checks if the layout of `self` matches the reference. Skips 0 modes.
+    /// Checks if the layout of `self` matches the reference. Skips 0-sized modes.
     #[inline]
     pub fn check_layout(self, r#ref: impl Into<Layout>) -> Result<Self, TensorErrorKind> {
-        let shape = self.layout();
+        let layout = self.layout();
         let r#ref: Layout = r#ref.into();
         let err = {
             let expected = r#ref.clone();
-            let found = shape.clone();
+            let found = layout.clone();
             || TensorErrorKind::IncompatibleLayouts { expected, found }
         };
-        shape
+        layout
             .iter()
             .zip(r#ref.iter())
             .filter(|(_, (x, _))| *x != 0)

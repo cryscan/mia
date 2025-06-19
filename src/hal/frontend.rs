@@ -115,8 +115,8 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
         eps: f32,
     ) -> Result<Self, TensorError> {
         let layout = self.layout();
-        let w = w.check_layout_len(1)?.check_shape(layout.shape_of(0))?;
-        let b = b.check_layout_len(1)?.check_shape(layout.shape_of(0))?;
+        let w = w.check_layout_len(1..=1)?.check_shape(layout.shape_of(0))?;
+        let b = b.check_layout_len(1..=1)?.check_shape(layout.shape_of(0))?;
 
         let phantom = PhantomData;
         let f = |op| LayerNormOp::<T> { op, eps, phantom };
