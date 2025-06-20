@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use derive_more::{Deref, DerefMut, Display, From, Into};
 use itertools::Itertools;
 use thiserror::Error;
@@ -37,7 +35,7 @@ pub trait Compose<F> {
 #[derive(Debug, Display, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[display("{_0:?}")]
-pub struct Shape(Arc<[usize]>);
+pub struct Shape(Box<[usize]>);
 
 impl From<usize> for Shape {
     fn from(value: usize) -> Self {
@@ -223,7 +221,7 @@ impl Shape {
 #[derive(Debug, Display, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[display("{_0:?}")]
-pub struct Stride(Arc<[usize]>);
+pub struct Stride(Box<[usize]>);
 
 impl From<usize> for Stride {
     fn from(value: usize) -> Self {
@@ -283,7 +281,7 @@ impl Stride {
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into, Display)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[display("{_0:?}")]
-pub struct Coord(Arc<[usize]>);
+pub struct Coord(Box<[usize]>);
 
 impl From<usize> for Coord {
     fn from(value: usize) -> Self {
@@ -358,7 +356,7 @@ impl Coord {
 #[derive(Debug, Display, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[display("<{}, {}>", self.shape(), self.stride())]
-pub struct Layout(Arc<[(usize, usize)]>);
+pub struct Layout(Box<[(usize, usize)]>);
 
 impl From<Vec<(usize, usize)>> for Layout {
     #[inline]
@@ -538,8 +536,9 @@ impl Layout {
     /// Maps a linear index to a multi-dimensional coordinate.
     #[inline]
     pub fn iota(&self, index: usize) -> Coord {
+        let init = Vec::with_capacity(self.len());
         self.iter()
-            .fold((vec![], 1), |(mut v, p), &(m, _)| {
+            .fold((init, 1), |(mut v, p), &(m, _)| {
                 v.push((index / p) % m);
                 (v, p * m)
             })
@@ -550,9 +549,10 @@ impl Layout {
     /// Same as [`Layout::iota`], but not limited by the bound of the highest dimension.
     #[inline]
     pub fn iota_extend(&self, index: usize) -> Coord {
+        let init = Vec::with_capacity(self.len());
         self.iter()
             .enumerate()
-            .fold((vec![], 1), |(mut v, p), (x, &(m, _))| {
+            .fold((init, 1), |(mut v, p), (x, &(m, _))| {
                 match x {
                     x if x + 1 == self.len() => v.push(index / p),
                     _ => v.push((index / p) % m),
@@ -670,7 +670,7 @@ impl Layout {
         let stride = [&stride[..], &[size]].concat(); // [d0, d1, ..., dα, M]
         let product = [vec![1], product].concat(); // [1, N0 d0, N1 d1, ..., Nα dα]
 
-        let shape: Arc<_> = stride
+        let shape: Box<_> = stride
             .iter()
             .zip_eq(product.iter())
             .map(|(d, p)| match d % p {
