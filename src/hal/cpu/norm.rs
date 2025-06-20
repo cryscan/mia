@@ -68,7 +68,7 @@ impl BackendOp<Backend> for SoftmaxOp<f32> {
 
 impl BackendOp<Backend> for SoftmaxOp<f16> {
     async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
-        let layout = io[0].layout.clone();
+        let layout = io[0].layout.pad_to(2);
         let x = backend.fetch(io[0].id);
 
         #[cfg(not(feature = "rayon"))]
@@ -360,6 +360,7 @@ mod tests {
     use std::{error::Error, sync::Arc};
 
     use half::f16;
+    use itertools::Itertools;
 
     use crate::loom::{device::CpuBuilder, tensor::Tensor};
 
@@ -392,7 +393,7 @@ mod tests {
 
         let output = a.back().await?;
         let r#ref: Box<_> = data
-            .chunks_exact(T)
+            .chunks_exact(C)
             .flat_map(|x| {
                 let max = x.iter().copied().fold(f16::NEG_INFINITY, f16::max);
                 let exp_sum: f32 = x
@@ -411,8 +412,8 @@ mod tests {
             })
             .collect();
 
-        for (index, (&a, &b)) in output.iter().zip(r#ref.iter()).enumerate() {
-            assert_approx_eq!(index, f16::to_f32(a), f16::to_f32(b), 1e-2);
+        for (index, (&a, &b)) in output.iter().zip_eq(r#ref.iter()).enumerate() {
+            assert_approx_eq!(index, f16::to_f32(a), f16::to_f32(b), 5e-3);
         }
 
         let data: Arc<_> = (0..C).map(|_| fastrand::f32()).map(f16::from_f32).collect();
@@ -437,8 +438,8 @@ mod tests {
                 .collect()
         };
 
-        for (index, (&a, &b)) in output.iter().zip(r#ref.iter()).enumerate() {
-            assert_approx_eq!(index, f16::to_f32(a), f16::to_f32(b), 1e-2);
+        for (index, (&a, &b)) in output.iter().zip_eq(r#ref.iter()).enumerate() {
+            assert_approx_eq!(index, f16::to_f32(a), f16::to_f32(b), 5e-3);
         }
 
         Ok(())
@@ -458,7 +459,7 @@ mod tests {
 
         let output = a.back().await?;
         let r#ref: Box<_> = data
-            .chunks_exact(T)
+            .chunks_exact(C)
             .flat_map(|x| {
                 let max = x.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                 let exp_sum: f32 = x.iter().map(|v| v - max).map(f32::exp).sum();
@@ -470,8 +471,8 @@ mod tests {
             })
             .collect();
 
-        for (index, (&a, &b)) in output.iter().zip(r#ref.iter()).enumerate() {
-            assert_approx_eq!(index, a, b, 1e-2);
+        for (index, (&a, &b)) in output.iter().zip_eq(r#ref.iter()).enumerate() {
+            assert_approx_eq!(index, a, b, 5e-3);
         }
 
         let data: Arc<_> = (0..C).map(|_| fastrand::f32()).collect();
@@ -489,8 +490,8 @@ mod tests {
                 .collect()
         };
 
-        for (index, (&a, &b)) in output.iter().zip(r#ref.iter()).enumerate() {
-            assert_approx_eq!(index, a, b, 1e-2);
+        for (index, (&a, &b)) in output.iter().zip_eq(r#ref.iter()).enumerate() {
+            assert_approx_eq!(index, a, b, 5e-3);
         }
 
         Ok(())
@@ -503,6 +504,7 @@ mod tests {
         let cpu = CpuBuilder::new().add_default_ops().build().await;
         const N: usize = 64;
         const C: usize = 128;
+        const EPS: f32 = 1.0e-5;
 
         let x_data: Arc<_> = (0..N * C).map(|_| f16::from_f32(fastrand::f32())).collect();
         let x = Tensor::create(cpu.clone(), [C, N], x_data.clone())?;
@@ -513,7 +515,7 @@ mod tests {
         let w = Tensor::create(cpu.clone(), [C], w_data.clone())?;
         let b = Tensor::create(cpu.clone(), [C], b_data.clone())?;
 
-        let y = x.layer_norm(w, b, 1e-5)?;
+        let y = x.layer_norm(w, b, EPS)?;
         let output = y.back().await?;
 
         let mut r#ref = Vec::with_capacity(N * C);
@@ -522,7 +524,6 @@ mod tests {
             let chunk = &x_data[start..start + C];
 
             let mean: f32 = chunk.iter().copied().map(f16::to_f32).sum::<f32>() / C as f32;
-
             let var: f32 = chunk
                 .iter()
                 .copied()
@@ -530,7 +531,7 @@ mod tests {
                 .map(|x| (x - mean).powi(2))
                 .sum::<f32>()
                 / C as f32;
-            let std = (var + 1e-5).sqrt();
+            let std = (var + EPS).sqrt();
 
             let mean = f16::from_f32(mean);
             let std = f16::from_f32(std);
@@ -540,7 +541,7 @@ mod tests {
             }
         }
 
-        for (index, (&a, &b)) in output.iter().zip(r#ref.iter()).enumerate() {
+        for (index, (&a, &b)) in output.iter().zip_eq(r#ref.iter()).enumerate() {
             assert_approx_eq!(index, f16::to_f32(a), f16::to_f32(b), 1e-2);
         }
 
@@ -586,7 +587,7 @@ mod tests {
             }
         }
 
-        for (index, (&a, &b)) in output.iter().zip(r#ref.iter()).enumerate() {
+        for (index, (&a, &b)) in output.iter().zip_eq(r#ref.iter()).enumerate() {
             assert_approx_eq!(index, a, b, 1e-2);
         }
 

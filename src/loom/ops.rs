@@ -170,6 +170,7 @@ impl PartialEq for TensorTape {
 impl Eq for TensorTape {}
 
 #[derive(Debug, Display, Clone, Deref, DerefMut)]
+#[display("```mermaid\n{_0}\n```")]
 pub struct Mermaid(pub String);
 
 impl TensorTape {
