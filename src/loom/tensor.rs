@@ -119,7 +119,7 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
 
     /// Returns a mutable reference to the tensor tape.
     ///
-    /// ## Panics
+    /// # Panics
     /// This method will panic if the tape is not unique, meaning that there are other references to the same tape.
     #[inline]
     pub fn tape_mut(&mut self) -> &mut TensorTape {

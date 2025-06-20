@@ -431,7 +431,7 @@ impl Layout {
 
     /// Creates a layout from shape and stride.
     ///
-    /// ## Panics
+    /// # Panics
     /// The method panics if lengths of the shape and the stride don't match.
     #[inline]
     pub fn from_shape_stride(shape: impl Into<Shape>, stride: impl Into<Stride>) -> Self {
@@ -697,7 +697,7 @@ impl Layout {
 
     /// Splits the layout at a given index.
     ///
-    /// ## Panics
+    /// # Panics
     /// This method will panic if `mid > len`.
     #[inline]
     pub fn split_at(&self, mid: usize) -> (Self, Self) {

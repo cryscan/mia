@@ -37,7 +37,7 @@ pub struct TensorIr {
 impl TensorIr {
     /// Creates a unique IR of the tensor.
     ///
-    /// ## Safety
+    /// # Safety
     /// This function is safe to call iff:
     /// 1. The given `id` and `layout` originate from the same tensor;
     /// 2. The tensor has exactly one active reference.
