@@ -31,6 +31,7 @@ impl BackendOp<Backend> for SoftmaxOp<f32> {
                         .sum();
                     lo.iter_indices()
                         .map(move |(_, lo)| x[lo + hi] - max)
+                        .map(f32::exp)
                         .map(move |x| x / exp_sum)
                 })
                 .collect()
@@ -56,6 +57,7 @@ impl BackendOp<Backend> for SoftmaxOp<f32> {
                     let x = x.clone();
                     lo.par_iter_indices()
                         .map(move |(_, lo)| x.read_slice::<f32>()[lo + hi] - max)
+                        .map(f32::exp)
                         .map(move |x| x / exp_sum)
                 })
                 .collect()
@@ -90,6 +92,7 @@ impl BackendOp<Backend> for SoftmaxOp<f16> {
                     lo.iter_indices()
                         .map(move |(_, lo)| x[lo + hi] - max)
                         .map(f16::to_f32)
+                        .map(f32::exp)
                         .map(move |x| x / exp_sum)
                         .map(f16::from_f32)
                 })
@@ -118,6 +121,7 @@ impl BackendOp<Backend> for SoftmaxOp<f16> {
                     lo.par_iter_indices()
                         .map(move |(_, lo)| x.read_slice::<f16>()[lo + hi] - max)
                         .map(f16::to_f32)
+                        .map(f32::exp)
                         .map(move |x| x / exp_sum)
                         .map(f16::from_f32)
                 })
@@ -384,8 +388,9 @@ mod tests {
         const C: usize = 1024;
         const T: usize = 768;
 
-        let data: Arc<_> = (0..C * T)
-            .map(|_| fastrand::f32())
+        let data: Arc<_> = (0..T)
+            .cartesian_product(0..C)
+            .map(|(t, c)| fastrand::f32() * t as f32 + fastrand::f32() * c as f32)
             .map(f16::from_f32)
             .collect();
         let a = Tensor::create(cpu.clone(), [C, T], data.clone())?;
@@ -440,6 +445,7 @@ mod tests {
 
         for (index, (&a, &b)) in output.iter().zip_eq(r#ref.iter()).enumerate() {
             assert_approx_eq!(index, f16::to_f32(a), f16::to_f32(b), 5e-3);
+            assert!((0.0..=1.0).contains(&f16::to_f32(a)));
         }
 
         Ok(())
@@ -450,10 +456,13 @@ mod tests {
         fastrand::seed(42);
 
         let cpu = CpuBuilder::new().add_default_ops().build().await;
-        const C: usize = 1024;
-        const T: usize = 768;
+        const C: usize = 128;
+        const T: usize = 64;
 
-        let data: Arc<_> = (0..C * T).map(|_| fastrand::f32()).collect();
+        let data: Arc<_> = (0..T)
+            .cartesian_product(0..C)
+            .map(|(t, c)| fastrand::f32() * t as f32 + fastrand::f32() * c as f32)
+            .collect();
         let a = Tensor::create(cpu.clone(), [C, T], data.clone())?;
         let a = a.softmax();
 
@@ -473,6 +482,7 @@ mod tests {
 
         for (index, (&a, &b)) in output.iter().zip_eq(r#ref.iter()).enumerate() {
             assert_approx_eq!(index, a, b, 5e-3);
+            assert!((0.0..=1.0).contains(&a));
         }
 
         let data: Arc<_> = (0..C).map(|_| fastrand::f32()).collect();
@@ -502,12 +512,16 @@ mod tests {
         fastrand::seed(42);
 
         let cpu = CpuBuilder::new().add_default_ops().build().await;
-        const N: usize = 64;
-        const C: usize = 128;
+        const C: usize = 1024;
+        const T: usize = 768;
         const EPS: f32 = 1.0e-5;
 
-        let x_data: Arc<_> = (0..N * C).map(|_| f16::from_f32(fastrand::f32())).collect();
-        let x = Tensor::create(cpu.clone(), [C, N], x_data.clone())?;
+        let x_data: Arc<_> = (0..T)
+            .cartesian_product(0..C)
+            .map(|(t, c)| fastrand::f32() * t as f32 + fastrand::f32() * c as f32)
+            .map(f16::from_f32)
+            .collect();
+        let x = Tensor::create(cpu.clone(), [C, T], x_data.clone())?;
 
         let w_data: Arc<_> = (0..C).map(|_| f16::from_f32(fastrand::f32())).collect();
         let b_data: Arc<_> = (0..C).map(|_| f16::from_f32(fastrand::f32())).collect();
@@ -518,8 +532,8 @@ mod tests {
         let y = x.layer_norm(w, b, EPS)?;
         let output = y.back().await?;
 
-        let mut r#ref = Vec::with_capacity(N * C);
-        for i in 0..N {
+        let mut r#ref = Vec::with_capacity(T * C);
+        for i in 0..T {
             let start = i * C;
             let chunk = &x_data[start..start + C];
 
@@ -553,12 +567,15 @@ mod tests {
         fastrand::seed(42);
 
         let cpu = CpuBuilder::new().add_default_ops().build().await;
-        const N: usize = 64;
-        const C: usize = 128;
+        const C: usize = 1024;
+        const T: usize = 768;
         const EPS: f32 = 1.0e-5;
 
-        let x_data: Arc<_> = (0..N * C).map(|_| fastrand::f32()).collect();
-        let x = Tensor::create(cpu.clone(), [C, N], x_data.clone())?;
+        let x_data: Arc<_> = (0..T)
+            .cartesian_product(0..C)
+            .map(|(t, c)| fastrand::f32() * t as f32 + fastrand::f32() * c as f32)
+            .collect();
+        let x = Tensor::create(cpu.clone(), [C, T], x_data.clone())?;
 
         let w_data: Arc<_> = (0..C).map(|_| f16::from_f32(fastrand::f32())).collect();
         let b_data: Arc<_> = (0..C).map(|_| f16::from_f32(fastrand::f32())).collect();
@@ -569,8 +586,8 @@ mod tests {
         let y = x.layer_norm(w, b, EPS)?;
         let output = y.back().await?;
 
-        let mut r#ref = Vec::with_capacity(N * C);
-        for i in 0..N {
+        let mut r#ref = Vec::with_capacity(T * C);
+        for i in 0..T {
             let start = i * C;
             let chunk = &x_data[start..start + C];
 
