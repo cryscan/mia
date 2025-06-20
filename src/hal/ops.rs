@@ -82,9 +82,7 @@ pub struct MatMatFp16Op<T> {
     #[tensor_op]
     pub op: InnerOp<2, 1>,
     pub phantom: PhantomData<T>,
-
     pub layouts: [Layout; 3],
-    pub tiles: [Layout; 3],
 }
 
 #[derive(Debug, Clone, TensorOp)]
@@ -93,4 +91,5 @@ pub struct MatVecFp16Op<T> {
     #[tensor_op]
     pub op: InnerOp<2, 1>,
     pub phantom: PhantomData<T>,
+    pub layouts: [Layout; 3],
 }

@@ -163,35 +163,36 @@ impl<D: Device + Clone> MatrixFp16<D> {
     /// Performs batched matrix multiplication between this `MatrixFp16` and another tensor.
     ///
     /// ## Arguments
-    /// * `self` - A `MatrixFp16` of shape `[M, K, B]`.
-    /// * `rhs` - The right-hand side tensor of shape `[N, K, B]` (transposed).
+    /// * `self` - A `MatrixFp16` of shape `[M, K]`.
+    /// * `rhs` - The right-hand side tensor of shape `[N, K]` (transposed).
     ///
     /// The inner dimension `K` must match between `self` and `rhs`.
     ///
     /// ## Returns
-    /// * `Result<Tensor<D, T>, TensorError>` - A new tensor of shape `[M, N, B]` containing the result,
+    /// * `Result<Tensor<D, T>, TensorError>` - A new tensor of shape `[M, N]` containing the result,
     ///   or an error if the dimensions are incompatible.
     #[inline]
-    pub fn matmul<T: Float4>(self, rhs: Tensor<D, T>) -> Result<Tensor<D, T>, TensorError> {
-        let [_m, k, b] = self.layout().shape().try_to_array()?;
-        let [_n, _, _] = rhs.layout().shape().try_to_array()?;
+    pub fn matmul<T: Float4>(
+        self,
+        rhs: Tensor<D, T>,
+    ) -> Result<Tensor<D, T::Element>, TensorError> {
+        let [k4, m] = self.layout().shape().try_to_array()?;
+        let [_, n] = rhs.layout().shape().try_to_array()?;
 
-        let lhs = self.0.check_layout([_m, k, b])?;
-        let rhs = rhs.check_layout([_n, k, b])?;
+        let lhs = self.0.check_layout([k4, m])?;
+        let rhs = rhs.check_layout([k4, n])?;
 
-        let (_bm, _bn, bk) = (4, 4, 16);
-        let bn = T::index(_bn);
-        let n = T::index(_n);
+        let (bk4, bm, bn) = (4, 16, 16);
 
         let layouts = [
-            Layout::from_shape([_m, k]),
-            Layout::from_shape([_n, k]),
-            Layout::from_shape([_m, n]),
+            Layout::from_shape([k4, m]),
+            Layout::from_shape([k4, n]),
+            Layout::from_shape([m, n]),
         ];
-        let tiles = [
-            layouts[0].div_tiler([(_bm, 1), (bk, 1)])?,
-            layouts[1].div_tiler([(_bn, 1), (bk, 1)])?,
-            layouts[2].div_tiler([(_bm, 1), (bn, 1)])?,
+        let layouts = [
+            layouts[0].div_tiler([(bk4, 1), (bm, 1)])?,
+            layouts[1].div_tiler([(bk4, 1), (bn, 1)])?,
+            layouts[2].div_tiler([(bm, 1), (bn, 1)])?,
         ];
 
         let phantom = PhantomData::<T>;
@@ -199,9 +200,9 @@ impl<D: Device + Clone> MatrixFp16<D> {
             op,
             phantom,
             layouts,
-            tiles,
         };
-        let output = Tensor::zeros(lhs.device().clone(), [_m, n, b]);
+        let device = lhs.device().clone();
+        let output = Tensor::zeros(device, [m, n]);
         Ok(build_api_2(f, output, lhs, rhs))
     }
 }

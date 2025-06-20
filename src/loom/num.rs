@@ -124,6 +124,15 @@ impl From<F32x4> for f32x4 {
     }
 }
 
+impl F32x4 {
+    #[inline]
+    pub fn dot(self, other: Self) -> f32 {
+        let lhs = f32x4::from(self);
+        let rhs = f32x4::from(other);
+        (lhs * rhs).reduce_add()
+    }
+}
+
 impl std::ops::Add for F32x4 {
     type Output = Self;
 
@@ -194,15 +203,22 @@ impl std::ops::DivAssign for F32x4 {
 #[repr(C)]
 pub struct F16x4(pub [f16; 4]);
 
+impl F16x4 {
+    #[inline]
+    pub fn dot(self, other: Self) -> f16 {
+        self[0] * other[0] + self[1] * other[1] + self[2] * other[2] + self[3] * other[3]
+    }
+}
+
 impl std::ops::Add for F16x4 {
     type Output = Self;
 
     fn add(self, other: Self) -> Self::Output {
         Self([
-            self.0[0] + other.0[0],
-            self.0[1] + other.0[1],
-            self.0[2] + other.0[2],
-            self.0[3] + other.0[3],
+            self[0] + other[0],
+            self[1] + other[1],
+            self[2] + other[2],
+            self[3] + other[3],
         ])
     }
 }
@@ -212,10 +228,10 @@ impl std::ops::Sub for F16x4 {
 
     fn sub(self, other: Self) -> Self::Output {
         Self([
-            self.0[0] - other.0[0],
-            self.0[1] - other.0[1],
-            self.0[2] - other.0[2],
-            self.0[3] - other.0[3],
+            self[0] - other[0],
+            self[1] - other[1],
+            self[2] - other[2],
+            self[3] - other[3],
         ])
     }
 }
@@ -225,10 +241,10 @@ impl std::ops::Mul for F16x4 {
 
     fn mul(self, other: Self) -> Self::Output {
         Self([
-            self.0[0] * other.0[0],
-            self.0[1] * other.0[1],
-            self.0[2] * other.0[2],
-            self.0[3] * other.0[3],
+            self[0] * other[0],
+            self[1] * other[1],
+            self[2] * other[2],
+            self[3] * other[3],
         ])
     }
 }
@@ -238,10 +254,10 @@ impl std::ops::Div for F16x4 {
 
     fn div(self, other: Self) -> Self::Output {
         Self([
-            self.0[0] / other.0[0],
-            self.0[1] / other.0[1],
-            self.0[2] / other.0[2],
-            self.0[3] / other.0[3],
+            self[0] / other[0],
+            self[1] / other[1],
+            self[2] / other[2],
+            self[3] / other[3],
         ])
     }
 }
