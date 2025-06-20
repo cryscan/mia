@@ -67,7 +67,7 @@ impl AsRef<Shape> for Shape {
 impl Shape {
     /// Converts the shape into a fixed-size array of exact length.
     #[inline]
-    pub fn to_array_exact<const N: usize>(&self) -> Result<[usize; N], LayoutError> {
+    pub fn try_to_array<const N: usize>(&self) -> Result<[usize; N], LayoutError> {
         let expected = N;
         let actual = self.len();
         let err = |_| LayoutError::Length { expected, actual };

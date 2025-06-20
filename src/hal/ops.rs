@@ -5,6 +5,7 @@ use mia_derive::TensorOp;
 
 use crate::loom::{
     device::{Backend, CpuBuilder, GpuBuilder},
+    layout::Layout,
     num::{F16x4, F32x4, Scalar},
     ops::{BackendOp, InnerOp, OneOp, TensorIr, ZeroOp},
 };
@@ -81,6 +82,9 @@ pub struct MatMatFp16Op<T> {
     #[tensor_op]
     pub op: InnerOp<2, 1>,
     pub phantom: PhantomData<T>,
+
+    pub layouts: [Layout; 3],
+    pub tiles: [Layout; 3],
 }
 
 #[derive(Debug, Clone, TensorOp)]

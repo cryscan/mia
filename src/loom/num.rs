@@ -464,6 +464,11 @@ pub trait Float4:
     + std::ops::DivAssign
 {
     type Element: Float;
+
+    #[inline]
+    fn index(index: usize) -> usize {
+        index * Self::DATA_TYPE.count()
+    }
 }
 
 impl Float4 for F32x4 {
