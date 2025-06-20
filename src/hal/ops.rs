@@ -77,7 +77,15 @@ pub struct LayerNormOp<T> {
 
 #[derive(Debug, Clone, TensorOp)]
 #[tensor_op(crate = "crate", bound = "T: Scalar")]
-pub struct MatMulFp16Op<T> {
+pub struct MatMatFp16Op<T> {
+    #[tensor_op]
+    pub op: InnerOp<2, 1>,
+    pub phantom: PhantomData<T>,
+}
+
+#[derive(Debug, Clone, TensorOp)]
+#[tensor_op(crate = "crate", bound = "T: Scalar")]
+pub struct MatVecFp16Op<T> {
     #[tensor_op]
     pub op: InnerOp<2, 1>,
     pub phantom: PhantomData<T>,

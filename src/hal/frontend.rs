@@ -4,7 +4,7 @@ use derive_more::{Deref, DerefMut};
 use half::f16;
 use mia_derive::build_api;
 
-use super::ops::{AddOp, CreateOp, LayerNormOp, MatMulFp16Op, SoftmaxOp};
+use super::ops::{AddOp, CreateOp, LayerNormOp, MatMatFp16Op, SoftmaxOp};
 use crate::loom::{
     device::{Device, DeviceError, DeviceEvent},
     layout::IntoLayout,
@@ -101,6 +101,14 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
 }
 
 impl<D: Device + Clone, T: Float> Tensor<D, T> {
+    /// # Softmax (`softmax`)
+    /// Performs softmax normalization on the input tensor.
+    ///
+    /// ## Arguments
+    /// * `self` - The input tensor to normalize, of shape `[M*]`.
+    ///
+    /// ## Returns
+    /// * `Tensor<D, T>` - A new tensor with the same shape as the input.
     #[inline]
     pub fn softmax(self) -> Self {
         let phantom = PhantomData;
@@ -109,6 +117,18 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
         build_api_1(f, output, self)
     }
 
+    /// # Layer Normalization (`layer_norm`)
+    /// Performs layer normalization on the input tensor using the given weight and bias tensors.
+    ///
+    /// ## Arguments
+    /// * `self` - The input tensor to normalize, of shape `[M, N*]`.
+    /// * `w` - The weight tensor of shape `[M]`.
+    /// * `b` - The bias tensor of shape `[M]`.
+    /// * `eps` - A small value added to the variance to avoid division by zero.
+    ///
+    /// ## Returns
+    /// * `Result<Tensor<D, T>, TensorError>` - A new tensor with the same shape as the input,
+    ///   or an error if the dimensions are incompatible.
     #[inline]
     pub fn layer_norm(
         self,
@@ -116,9 +136,9 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
         b: Tensor<D, f16>,
         eps: f32,
     ) -> Result<Self, TensorError> {
-        let [x] = self.layout().shape().to_array();
-        let w = w.check_dim(1..=1)?.check_shape(x)?;
-        let b = b.check_dim(1..=1)?.check_shape(x)?;
+        let [m] = self.layout().shape().to_array();
+        let w = w.check_dim(1..=1)?.check_shape(m)?;
+        let b = b.check_dim(1..=1)?.check_shape(m)?;
 
         let phantom = PhantomData::<T>;
         let f = |op| LayerNormOp { op, eps, phantom };
@@ -139,6 +159,18 @@ impl<D: Device + Clone> MatrixFp16<D> {
         Ok(Self(tensor))
     }
 
+    /// # Matrix Multiplication (`matmul`)
+    /// Performs batched matrix multiplication between this `MatrixFp16` and another tensor.
+    ///
+    /// ## Arguments
+    /// * `self` - A `MatrixFp16` of shape `[M, K, B]`.
+    /// * `rhs` - The right-hand side tensor of shape `[N, K, B]` (transposed).
+    ///
+    /// The inner dimension `K` must match between `self` and `rhs`.
+    ///
+    /// ## Returns
+    /// * `Result<Tensor<D, T>, TensorError>` - A new tensor of shape `[M, N, B]` containing the result,
+    ///   or an error if the dimensions are incompatible.
     #[inline]
     pub fn matmul<T: Float>(self, rhs: Tensor<D, T>) -> Result<Tensor<D, T>, TensorError> {
         let [m, k, b] = self.layout().shape().to_array_exact()?;
@@ -146,7 +178,7 @@ impl<D: Device + Clone> MatrixFp16<D> {
         let rhs = rhs.check_layout([n, k, b])?;
 
         let phantom = PhantomData::<T>;
-        let f = |op| MatMulFp16Op { op, phantom };
+        let f = |op| MatMatFp16Op { op, phantom };
         let output = Tensor::zeros(self.device().clone(), [m, n, b]);
         Ok(build_api_2(f, output, self.0, rhs))
     }
