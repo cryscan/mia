@@ -208,6 +208,26 @@ impl F16x4 {
     pub fn dot(self, other: Self) -> f16 {
         self[0] * other[0] + self[1] * other[1] + self[2] * other[2] + self[3] * other[3]
     }
+
+    #[inline]
+    pub fn to_f32(self) -> F32x4 {
+        F32x4([
+            self[0].to_f32(),
+            self[1].to_f32(),
+            self[2].to_f32(),
+            self[3].to_f32(),
+        ])
+    }
+
+    #[inline]
+    pub fn from_f32(value: F32x4) -> Self {
+        Self([
+            f16::from_f32(value[0]),
+            f16::from_f32(value[1]),
+            f16::from_f32(value[2]),
+            f16::from_f32(value[3]),
+        ])
+    }
 }
 
 impl std::ops::Add for F16x4 {
