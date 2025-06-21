@@ -8,7 +8,7 @@ use super::ops::{AddOp, CreateOp, LayerNormOp, MatMatFp16Op, SoftmaxOp};
 use crate::loom::{
     device::{Device, DeviceError, DeviceEvent},
     layout::{IntoLayout, Layout},
-    num::{F16x4, Float, Float4, Scalar},
+    num::{F16x4, Float, Scalar},
     ops::{Access, InnerOp, Mermaid, OneOp, TensorOp},
     tensor::{Tensor, TensorError},
 };
@@ -152,10 +152,10 @@ pub struct MatrixFp16<D>(pub Tensor<D, F16x4>);
 
 impl<D: Device + Clone> MatrixFp16<D> {
     #[inline]
-    pub fn from_tensor<T: Scalar>(tensor: Tensor<D, T>) -> Result<Self, TensorError> {
-        let [m, n, b] = tensor.layout().pad_to(3).shape().try_to_array()?;
-        let tensor = tensor.check_layout([m, n, b])?;
-        let tensor = tensor.cast([m * T::DATA_TYPE.count() / 4, n, b])?;
+    pub fn from_tensor(tensor: Tensor<D, f16>) -> Result<Self, TensorError> {
+        let [k, m] = tensor.layout().pad_to(2).shape().try_to_array()?;
+        let tensor = tensor.check_layout([k, m])?;
+        let tensor = tensor.cast([f16::index::<F16x4>(k), m])?;
         Ok(Self(tensor))
     }
 
@@ -163,8 +163,8 @@ impl<D: Device + Clone> MatrixFp16<D> {
     /// Performs batched matrix multiplication between this `MatrixFp16` and another tensor.
     ///
     /// ## Arguments
-    /// * `self` - A `MatrixFp16` of shape `[M, K]`.
-    /// * `rhs` - The right-hand side tensor of shape `[N, K]` (transposed).
+    /// * `self` - A `MatrixFp16` of shape `[K, M]`.
+    /// * `rhs` - The right-hand side tensor of shape `[K, N]` (transposed).
     ///
     /// The inner dimension `K` must match between `self` and `rhs`.
     ///
@@ -172,26 +172,25 @@ impl<D: Device + Clone> MatrixFp16<D> {
     /// * `Result<Tensor<D, T>, TensorError>` - A new tensor of shape `[M, N]` containing the result,
     ///   or an error if the dimensions are incompatible.
     #[inline]
-    pub fn matmul<T: Float4>(
-        self,
-        rhs: Tensor<D, T>,
-    ) -> Result<Tensor<D, T::Element>, TensorError> {
-        let [k4, m] = self.layout().shape().try_to_array()?;
-        let [_, n] = rhs.layout().shape().try_to_array()?;
+    pub fn matmul<T: Float>(self, rhs: Tensor<D, T>) -> Result<Tensor<D, T>, TensorError> {
+        let [k, n] = rhs.layout().shape().try_to_array()?;
+        let rhs = rhs.cast::<T::Float4>([T::index::<T::Float4>(k), n])?;
 
-        let lhs = self.0.check_layout([k4, m])?;
-        let rhs = rhs.check_layout([k4, n])?;
+        let [k, m] = self.layout().shape().try_to_array()?;
 
-        let (bk4, bm, bn) = (4, 16, 16);
+        let lhs = self.0.check_layout([k, m])?;
+        let rhs = rhs.check_layout([k, n])?;
+
+        let (bk, bm, bn) = (4, 16, 16);
 
         let layouts = [
-            Layout::from_shape([k4, m]),
-            Layout::from_shape([k4, n]),
+            Layout::from_shape([k, m]),
+            Layout::from_shape([k, n]),
             Layout::from_shape([m, n]),
         ];
         let layouts = [
-            layouts[0].div_tiler([(bk4, 1), (bm, 1)])?,
-            layouts[1].div_tiler([(bk4, 1), (bn, 1)])?,
+            layouts[0].div_tiler([(bk, 1), (bm, 1)])?,
+            layouts[1].div_tiler([(bk, 1), (bn, 1)])?,
             layouts[2].div_tiler([(bm, 1), (bn, 1)])?,
         ];
 

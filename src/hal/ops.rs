@@ -24,6 +24,7 @@ impl CpuBuilder {
             .add_op::<SoftmaxOp<f16>>()
             .add_op::<LayerNormOp<f32>>()
             .add_op::<LayerNormOp<f16>>()
+            .add_op::<MatMatFp16Op<f16>>()
     }
 }
 

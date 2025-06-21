@@ -460,6 +460,12 @@ impl Layout {
         array
     }
 
+    /// Creates a buffer vector with the same size as the layout.
+    #[inline]
+    pub fn make_vec<T: Default + Clone>(&self) -> Vec<T> {
+        vec![Default::default(); self.co_size()]
+    }
+
     /// Retrieves the shape of the layout.
     #[inline]
     pub fn shape(&self) -> Shape {

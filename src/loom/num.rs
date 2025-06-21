@@ -414,6 +414,12 @@ impl One for F16x4 {
 
 pub trait Scalar: Sized + Zeroable + Pod + Zero + One + Send + Sync {
     const DATA_TYPE: DataType;
+
+    /// Convert the index of the scalar to the index of another data type.
+    #[inline]
+    fn index<T: Scalar>(index: usize) -> usize {
+        index * Self::DATA_TYPE.count() / T::DATA_TYPE.count()
+    }
 }
 
 impl Scalar for f32 {
@@ -463,10 +469,15 @@ pub trait Float:
     + std::ops::MulAssign
     + std::ops::DivAssign
 {
+    type Float4: Float4;
 }
 
-impl Float for f32 {}
-impl Float for f16 {}
+impl Float for f32 {
+    type Float4 = F32x4;
+}
+impl Float for f16 {
+    type Float4 = F16x4;
+}
 
 pub trait Float4:
     Scalar
@@ -479,19 +490,14 @@ pub trait Float4:
     + std::ops::MulAssign
     + std::ops::DivAssign
 {
-    type Element: Float;
-
-    #[inline]
-    fn index(index: usize) -> usize {
-        index * Self::DATA_TYPE.count()
-    }
+    type Float: Float;
 }
 
 impl Float4 for F32x4 {
-    type Element = f32;
+    type Float = f32;
 }
 impl Float4 for F16x4 {
-    type Element = f16;
+    type Float = f16;
 }
 
 #[cfg(test)]
