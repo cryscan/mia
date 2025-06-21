@@ -383,6 +383,18 @@ impl IntoLayout for Layout {
     }
 }
 
+impl IntoLayout for &Layout {
+    fn into_layout(self) -> Layout {
+        self.to_owned()
+    }
+}
+
+impl IntoLayout for &mut Layout {
+    fn into_layout(self) -> Layout {
+        self.to_owned()
+    }
+}
+
 impl<S, D> IntoLayout for (S, D)
 where
     S: Into<Shape>,
@@ -458,12 +470,6 @@ impl Layout {
         let len = self.len().min(N);
         array[..len].copy_from_slice(&self[..len]);
         array
-    }
-
-    /// Creates a buffer vector with the same size as the layout.
-    #[inline]
-    pub fn make_vec<T: Default + Clone>(&self) -> Vec<T> {
-        vec![Default::default(); self.co_size()]
     }
 
     /// Retrieves the shape of the layout.

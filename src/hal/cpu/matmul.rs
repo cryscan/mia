@@ -3,8 +3,11 @@ use half::f16;
 use crate::{
     hal::ops::MatMatFp16Op,
     loom::{
-        device::{Backend as _, cpu::Backend},
-        layout::{IndexFn, Layout},
+        device::{
+            Backend as _,
+            cpu::{Backend, make_buffer},
+        },
+        layout::Layout,
         num::{F16x4, F32x4},
         ops::{BackendOp, TensorIr},
         platform::handle,
@@ -20,30 +23,30 @@ impl BackendOp<Backend> for MatMatFp16Op<f16> {
 
         let a = backend.fetch(io[0].id);
         let b = backend.fetch(io[1].id);
-        let c = backend.create(io[2].id, _c.make_vec::<f16>());
+        let c = backend.create(io[2].id, make_buffer::<f16>(&_c));
 
         #[cfg(not(feature = "rayon"))]
         handle(move || {
-            let a = a.read_slice::<F16x4>();
-            let b = b.read_slice::<F16x4>();
-            let mut c = c.write_slice::<f16>();
+            let a = a.read_layout::<F16x4>(&_a);
+            let b = b.read_layout::<F16x4>(&_b);
+            let mut c = c.write_layout::<f16>(&_c);
 
             for (j, i, k) in itertools::iproduct!(0..bn, 0..bm, 0..bk) {
                 let _ta = Layout::from_shape([tk, tm]);
                 let _tb = Layout::from_shape([tk, tn]);
-                let mut ta = _ta.make_vec();
-                let mut tb = _tb.make_vec();
+                let mut ta = make_buffer::<F16x4>(&_ta);
+                let mut tb = make_buffer::<F16x4>(&_tb);
 
                 for (y, x) in itertools::iproduct!(0..tm, 0..tk) {
-                    ta[_ta.value([x, y])] = a[_a.value([x, y, k, i])]
+                    ta[[x, y]] = a[[x, y, k, i]];
                 }
                 for (y, x) in itertools::iproduct!(0..tn, 0..tk) {
-                    tb[_tb.value([x, y])] = b[_b.value([x, y, k, j])];
+                    tb[[x, y]] = b[[x, y, k, j]];
                 }
                 for (y, x, z) in itertools::iproduct!(0..tn, 0..tm, 0..tk) {
-                    let ra = ta[_ta.value([z, x])];
-                    let rb = tb[_tb.value([z, y])];
-                    c[_c.value([x, y, i, j])] += ra.dot(rb);
+                    let ra = ta[[z, x]];
+                    let rb = tb[[z, y]];
+                    c[[x, y, i, j]] += ra.dot(rb);
                 }
             }
         })
@@ -53,52 +56,48 @@ impl BackendOp<Backend> for MatMatFp16Op<f16> {
             use itertools::Itertools;
             use rayon::prelude::*;
 
-            itertools::iproduct!(0..bn, 0..bm)
-                .collect_vec()
-                .into_par_iter()
-                .map(move |(j, i)| {
-                    let _a = _a.clone();
-                    let _b = _b.clone();
-                    let a = a.clone();
-                    let b = b.clone();
+            use crate::loom::device::cpu::form_buffer;
 
+            let a = a.read_layout::<F16x4>(&_a);
+            let b = b.read_layout::<F16x4>(&_b);
+
+            (0..bn)
+                .cartesian_product(0..bm)
+                .collect::<Vec<_>>()
+                .into_par_iter()
+                .map(|(j, i)| {
                     let tc = (0..bk)
                         .into_par_iter()
-                        .map(move |k| {
+                        .map(|k| {
                             let _ta = Layout::from_shape([tk, tm]);
                             let _tb = Layout::from_shape([tk, tn]);
-                            let _tc = Layout::from_shape([tm, tn]);
-                            let mut ta = _ta.make_vec();
-                            let mut tb = _tb.make_vec();
-                            let mut tc = _tc.make_vec();
-
-                            let a = a.read_slice::<F16x4>();
-                            let b = b.read_slice::<F16x4>();
+                            let mut ta = make_buffer::<F16x4>(&_ta);
+                            let mut tb = make_buffer::<F16x4>(&_tb);
+                            let mut tc = make_buffer::<f16>(&Layout::from_shape([tm, tn]));
 
                             for (y, x) in itertools::iproduct!(0..tm, 0..tk) {
-                                ta[_ta.value([x, y])] = a[_a.value([x, y, k, i])]
+                                ta[[x, y]] = a[[x, y, k, i]];
                             }
                             for (y, x) in itertools::iproduct!(0..tn, 0..tk) {
-                                tb[_tb.value([x, y])] = b[_b.value([x, y, k, j])];
+                                tb[[x, y]] = b[[x, y, k, j]];
                             }
                             for (y, x, z) in itertools::iproduct!(0..tn, 0..tm, 0..tk) {
-                                let ra = ta[_ta.value([z, x])];
-                                let rb = tb[_tb.value([z, y])];
-                                tc[_tc.value([x, y])] += ra.dot(rb);
+                                let ra = ta[[z, x]];
+                                let rb = tb[[z, y]];
+                                tc[[x, y]] += ra.dot(rb);
                             }
-                            tc
+                            tc.into_inner()
                         })
                         .reduce(
-                            || vec![f16::default(); tm * tn],
+                            || vec![f16::default(); tm * tn].into_boxed_slice(),
                             |a, b| a.into_iter().zip_eq(b).map(|(a, b)| a + b).collect(),
                         );
-                    ((i, j), tc)
+                    ((i, j), form_buffer(tc, [tm, tn]))
                 })
                 .for_each(|((i, j), tc)| {
-                    let mut c = c.write_slice::<f16>();
-                    let _tc = Layout::from_shape([tm, tn]);
+                    let mut c = c.write_layout::<f16>(&_c);
                     for (y, x) in itertools::iproduct!(0..tn, 0..tm) {
-                        c[_c.value([x, y, i, j])] = tc[_tc.value([x, y])];
+                        c[[x, y, i, j]] = tc[[x, y]];
                     }
                 });
         })
@@ -115,30 +114,30 @@ impl BackendOp<Backend> for MatMatFp16Op<f32> {
 
         let a = backend.fetch(io[0].id);
         let b = backend.fetch(io[1].id);
-        let c = backend.create(io[2].id, _c.make_vec::<f32>());
+        let c = backend.create(io[2].id, make_buffer::<f32>(&_c));
 
         #[cfg(not(feature = "rayon"))]
         handle(move || {
-            let a = a.read_slice::<F16x4>();
-            let b = b.read_slice::<F32x4>();
-            let mut c = c.write_slice::<f32>();
+            let a = a.read_layout::<F16x4>(_a);
+            let b = b.read_layout::<F32x4>(_b);
+            let mut c = c.write_layout::<f32>(_c);
 
             for (j, i, k) in itertools::iproduct!(0..bn, 0..bm, 0..bk) {
                 let _ta = Layout::from_shape([tk, tm]);
                 let _tb = Layout::from_shape([tk, tn]);
-                let mut ta = _ta.make_vec();
-                let mut tb = _tb.make_vec();
+                let mut ta = make_buffer(_ta);
+                let mut tb = make_buffer(_tb);
 
                 for (y, x) in itertools::iproduct!(0..tm, 0..tk) {
-                    ta[_ta.value([x, y])] = a[_a.value([x, y, k, i])]
+                    ta[[x, y]] = a[[x, y, k, i]]
                 }
                 for (y, x) in itertools::iproduct!(0..tn, 0..tk) {
-                    tb[_tb.value([x, y])] = b[_b.value([x, y, k, j])];
+                    tb[[x, y]] = b[[x, y, k, j]];
                 }
                 for (y, x, z) in itertools::iproduct!(0..tn, 0..tm, 0..tk) {
-                    let ra = ta[_ta.value([z, x])];
-                    let rb = tb[_tb.value([z, y])];
-                    c[_c.value([x, y, i, j])] += ra.to_f32().dot(rb);
+                    let ra = ta[[z, x]];
+                    let rb = tb[[z, y]];
+                    c[[x, y, i, j]] += ra.to_f32().dot(rb);
                 }
             }
         })
@@ -147,6 +146,8 @@ impl BackendOp<Backend> for MatMatFp16Op<f32> {
         handle(move || {
             use itertools::Itertools;
             use rayon::prelude::*;
+
+            use crate::loom::device::cpu::form_buffer;
 
             itertools::iproduct!(0..bn, 0..bm)
                 .collect_vec()
@@ -163,37 +164,36 @@ impl BackendOp<Backend> for MatMatFp16Op<f32> {
                             let _ta = Layout::from_shape([tk, tm]);
                             let _tb = Layout::from_shape([tk, tn]);
                             let _tc = Layout::from_shape([tm, tn]);
-                            let mut ta = _ta.make_vec();
-                            let mut tb = _tb.make_vec();
-                            let mut tc = _tc.make_vec();
+                            let mut ta = make_buffer(_ta);
+                            let mut tb = make_buffer(_tb);
+                            let mut tc = make_buffer(_tc);
 
-                            let a = a.read_slice::<F16x4>();
-                            let b = b.read_slice::<F32x4>();
+                            let a = a.read_layout::<F16x4>(&_a);
+                            let b = b.read_layout::<F32x4>(&_b);
 
                             for (y, x) in itertools::iproduct!(0..tm, 0..tk) {
-                                ta[_ta.value([x, y])] = a[_a.value([x, y, k, i])]
+                                ta[[x, y]] = a[[x, y, k, i]]
                             }
                             for (y, x) in itertools::iproduct!(0..tn, 0..tk) {
-                                tb[_tb.value([x, y])] = b[_b.value([x, y, k, j])];
+                                tb[[x, y]] = b[[x, y, k, j]];
                             }
                             for (y, x, z) in itertools::iproduct!(0..tn, 0..tm, 0..tk) {
-                                let ra = ta[_ta.value([z, x])];
-                                let rb = tb[_tb.value([z, y])];
-                                tc[_tc.value([x, y])] += ra.to_f32().dot(rb);
+                                let ra = ta[[z, x]];
+                                let rb = tb[[z, y]];
+                                tc[[x, y]] += ra.to_f32().dot(rb);
                             }
-                            tc
+                            tc.into_inner()
                         })
                         .reduce(
-                            || vec![f32::default(); tm * tn],
+                            || vec![f32::default(); tm * tn].into_boxed_slice(),
                             |a, b| a.into_iter().zip_eq(b).map(|(a, b)| a + b).collect(),
                         );
-                    ((i, j), tc)
+                    ((i, j), form_buffer(tc, [tm, tn]))
                 })
                 .for_each(|((i, j), tc)| {
-                    let mut c = c.write_slice::<f32>();
-                    let _tc = Layout::from_shape([tm, tn]);
+                    let mut c = c.write_layout::<f32>(&_c);
                     for (y, x) in itertools::iproduct!(0..tn, 0..tm) {
-                        c[_c.value([x, y, i, j])] = tc[_tc.value([x, y])];
+                        c[[x, y, i, j]] = tc[[x, y]];
                     }
                 });
         })

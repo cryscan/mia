@@ -15,6 +15,7 @@ use super::{
     allocator::{AllocOp, Allocator, StashId},
 };
 use crate::loom::{
+    layout::{IndexFn, IntoLayout, Layout},
     num::Scalar,
     ops::{BackendOp, TensorIr, TensorOp},
     platform,
@@ -79,6 +80,36 @@ impl Buffer {
     }
 
     #[inline]
+    pub fn read_layout<T: Scalar>(
+        &self,
+        layout: impl IntoLayout,
+    ) -> LayoutBufferReader<impl Deref<Target = [T]>, T> {
+        let inner = self.read_slice::<T>();
+        let layout = layout.into_layout();
+        let phantom = PhantomData::<T>;
+        LayoutBufferReader {
+            inner,
+            layout,
+            phantom,
+        }
+    }
+
+    #[inline]
+    pub fn write_layout<T: Scalar>(
+        &self,
+        layout: impl IntoLayout,
+    ) -> LayoutBufferWriter<impl DerefMut<Target = [T]>, T> {
+        let inner = self.write_slice::<T>();
+        let layout = layout.into_layout();
+        let phantom = PhantomData::<T>;
+        LayoutBufferWriter {
+            inner,
+            layout,
+            phantom,
+        }
+    }
+
+    #[inline]
     pub fn into_inner(self) -> Box<[u8]> {
         match Arc::try_unwrap(self.data) {
             Ok(inner) => inner.into_inner().expect("lock poisoned"),
@@ -140,6 +171,170 @@ where
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         bytemuck::cast_slice_mut(&mut self.lock)
+    }
+}
+
+pub struct LayoutBufferReader<R, T> {
+    inner: R,
+    layout: Layout,
+    phantom: PhantomData<T>,
+}
+
+impl<R, T> LayoutBufferReader<R, T> {
+    #[inline]
+    pub fn new(inner: R, layout: impl IntoLayout) -> Self {
+        let layout = layout.into_layout();
+        let phantom = PhantomData;
+        Self {
+            inner,
+            layout,
+            phantom,
+        }
+    }
+
+    #[inline]
+    pub fn into_inner(self) -> R {
+        self.inner
+    }
+
+    #[inline]
+    pub fn layout(&self) -> Layout {
+        self.layout.clone()
+    }
+}
+
+impl<R, T> std::ops::Deref for LayoutBufferReader<R, T>
+where
+    R: Deref<Target = [T]>,
+    T: Scalar,
+{
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.deref()
+    }
+}
+
+impl<const N: usize, R, T> std::ops::Index<[usize; N]> for LayoutBufferReader<R, T>
+where
+    R: Deref<Target = [T]>,
+    T: Scalar,
+{
+    type Output = T;
+
+    fn index(&self, index: [usize; N]) -> &Self::Output {
+        &self.inner[self.layout.value(index)]
+    }
+}
+
+pub struct LayoutBufferWriter<R, T> {
+    inner: R,
+    layout: Layout,
+    phantom: PhantomData<T>,
+}
+
+impl<R, T> LayoutBufferWriter<R, T> {
+    #[inline]
+    pub fn new(inner: R, layout: impl IntoLayout) -> Self {
+        let layout = layout.into_layout();
+        let phantom = PhantomData;
+        Self {
+            inner,
+            layout,
+            phantom,
+        }
+    }
+
+    #[inline]
+    pub fn into_inner(self) -> R {
+        self.inner
+    }
+
+    #[inline]
+    pub fn layout(&self) -> Layout {
+        self.layout.clone()
+    }
+}
+
+impl<R, T> std::ops::Deref for LayoutBufferWriter<R, T>
+where
+    R: Deref<Target = [T]>,
+    T: Scalar,
+{
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.deref()
+    }
+}
+
+impl<R, T> std::ops::DerefMut for LayoutBufferWriter<R, T>
+where
+    R: DerefMut<Target = [T]>,
+    T: Scalar,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.inner.deref_mut()
+    }
+}
+
+impl<const N: usize, R, T> std::ops::Index<[usize; N]> for LayoutBufferWriter<R, T>
+where
+    R: Deref<Target = [T]>,
+    T: Scalar,
+{
+    type Output = T;
+
+    fn index(&self, index: [usize; N]) -> &Self::Output {
+        &self.inner[self.layout.value(index)]
+    }
+}
+
+impl<const N: usize, R, T> std::ops::IndexMut<[usize; N]> for LayoutBufferWriter<R, T>
+where
+    R: DerefMut<Target = [T]>,
+    T: Scalar,
+{
+    fn index_mut(&mut self, index: [usize; N]) -> &mut Self::Output {
+        &mut self.inner[self.layout.value(index)]
+    }
+}
+
+#[inline]
+pub fn make_buffer<T: Scalar>(layout: impl IntoLayout) -> LayoutBufferWriter<Box<[T]>, T> {
+    let layout = layout.into_layout();
+    let inner = vec![T::zero(); layout.co_size()].into_boxed_slice();
+    let phantom = PhantomData;
+    LayoutBufferWriter {
+        inner,
+        layout,
+        phantom,
+    }
+}
+
+pub fn form_buffer<T: Scalar>(
+    buffer: Box<[T]>,
+    layout: impl IntoLayout,
+) -> LayoutBufferWriter<Box<[T]>, T> {
+    let inner = buffer;
+    let layout = layout.into_layout();
+    let phantom = PhantomData;
+    LayoutBufferWriter {
+        inner,
+        layout,
+        phantom,
+    }
+}
+
+impl<T: Scalar> From<LayoutBufferReader<Box<[T]>, T>> for Cow<'_, [T]> {
+    fn from(value: LayoutBufferReader<Box<[T]>, T>) -> Self {
+        Cow::Owned(value.inner.into_vec())
+    }
+}
+
+impl<T: Scalar> From<LayoutBufferWriter<Box<[T]>, T>> for Cow<'_, [T]> {
+    fn from(value: LayoutBufferWriter<Box<[T]>, T>) -> Self {
+        Cow::Owned(value.inner.into_vec())
     }
 }
 
