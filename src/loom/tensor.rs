@@ -288,7 +288,7 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
     #[inline]
     pub fn zeros_like<U: Scalar>(&self) -> Tensor<D, U> {
         let device = self.device.clone();
-        let layout = self.layout();
+        let layout = Layout::from_shape(self.layout.shape());
         Tensor::zeros(device, layout)
     }
 }
