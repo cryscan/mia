@@ -13,19 +13,20 @@ use crate::{
 
 impl BackendOp<Backend> for MatMatFp16Op<f16> {
     async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
-        let a = backend.fetch(io[0].id);
-        let b = backend.fetch(io[1].id);
-
         let [_a, _b, _c] = self.layouts.clone();
         let [tk, tm, bk, bm] = _a.shape().to_array();
         let [_, tn, _, bn] = _b.shape().to_array();
         assert_eq!([tm, tn, bm, bn], _c.shape().to_array::<4>());
 
+        let a = backend.fetch(io[0].id);
+        let b = backend.fetch(io[1].id);
+        let c = backend.create(io[2].id, _c.make_vec::<f16>());
+
         #[cfg(not(feature = "rayon"))]
-        let output: Vec<_> = handle(move || {
+        handle(move || {
             let a = a.read_slice::<F16x4>();
             let b = b.read_slice::<F16x4>();
-            let mut c: Vec<f16> = _c.make_vec();
+            let mut c = c.write_slice::<f16>();
 
             for (j, i, k) in itertools::iproduct!(0..bn, 0..bm, 0..bk) {
                 let _ta = Layout::from_shape([tk, tm]);
@@ -45,25 +46,23 @@ impl BackendOp<Backend> for MatMatFp16Op<f16> {
                     c[_c.value([x, y, i, j])] += ra.dot(rb);
                 }
             }
-            c
         })
         .await;
         #[cfg(feature = "rayon")]
-        let output: Vec<_> = handle(move || {
+        handle(move || {
             use itertools::Itertools;
             use rayon::prelude::*;
 
-            let layout = Layout::from_shape([tm, tn, bm, bn]);
-            let tiles: Vec<_> = itertools::iproduct!(0..bn, 0..bm)
+            itertools::iproduct!(0..bn, 0..bm)
                 .collect_vec()
                 .into_par_iter()
-                .flat_map(move |(j, i)| {
+                .map(move |(j, i)| {
                     let _a = _a.clone();
                     let _b = _b.clone();
                     let a = a.clone();
                     let b = b.clone();
 
-                    (0..bk)
+                    let tc = (0..bk)
                         .into_par_iter()
                         .map(move |k| {
                             let _ta = Layout::from_shape([tk, tm]);
@@ -92,37 +91,37 @@ impl BackendOp<Backend> for MatMatFp16Op<f16> {
                         .reduce(
                             || vec![f16::default(); tm * tn],
                             |a, b| a.into_iter().zip_eq(b).map(|(a, b)| a + b).collect(),
-                        )
+                        );
+                    ((i, j), tc)
                 })
-                .collect();
-
-            let mut c = _c.make_vec();
-            for (j, i, y, x) in itertools::iproduct!(0..bn, 0..bm, 0..tn, 0..tm) {
-                c[_c.value([x, y, i, j])] = tiles[layout.value([x, y, i, j])]
-            }
-            c
+                .for_each(|((i, j), tc)| {
+                    let mut c = c.write_slice::<f16>();
+                    let _tc = Layout::from_shape([tm, tn]);
+                    for (y, x) in itertools::iproduct!(0..tn, 0..tm) {
+                        c[_c.value([x, y, i, j])] = tc[_tc.value([x, y])];
+                    }
+                });
         })
         .await;
-
-        backend.create(io[2].id, output);
     }
 }
 
 impl BackendOp<Backend> for MatMatFp16Op<f32> {
     async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
-        let a = backend.fetch(io[0].id);
-        let b = backend.fetch(io[1].id);
-
         let [_a, _b, _c] = self.layouts.clone();
         let [tk, tm, bk, bm] = _a.shape().to_array();
         let [_, tn, _, bn] = _b.shape().to_array();
         assert_eq!([tm, tn, bm, bn], _c.shape().to_array::<4>());
 
+        let a = backend.fetch(io[0].id);
+        let b = backend.fetch(io[1].id);
+        let c = backend.create(io[2].id, _c.make_vec::<f32>());
+
         #[cfg(not(feature = "rayon"))]
-        let output: Vec<_> = handle(move || {
+        handle(move || {
             let a = a.read_slice::<F16x4>();
             let b = b.read_slice::<F32x4>();
-            let mut c: Vec<f32> = _c.make_vec();
+            let mut c = c.write_slice::<f32>();
 
             for (j, i, k) in itertools::iproduct!(0..bn, 0..bm, 0..bk) {
                 let _ta = Layout::from_shape([tk, tm]);
@@ -142,25 +141,23 @@ impl BackendOp<Backend> for MatMatFp16Op<f32> {
                     c[_c.value([x, y, i, j])] += ra.to_f32().dot(rb);
                 }
             }
-            c
         })
         .await;
         #[cfg(feature = "rayon")]
-        let output: Vec<_> = handle(move || {
+        handle(move || {
             use itertools::Itertools;
             use rayon::prelude::*;
 
-            let layout = Layout::from_shape([tm, tn, bm, bn]);
-            let tiles: Vec<_> = itertools::iproduct!(0..bn, 0..bm)
+            itertools::iproduct!(0..bn, 0..bm)
                 .collect_vec()
                 .into_par_iter()
-                .flat_map(move |(j, i)| {
+                .map(move |(j, i)| {
                     let _a = _a.clone();
                     let _b = _b.clone();
                     let a = a.clone();
                     let b = b.clone();
 
-                    (0..bk)
+                    let tc = (0..bk)
                         .into_par_iter()
                         .map(move |k| {
                             let _ta = Layout::from_shape([tk, tm]);
@@ -189,19 +186,18 @@ impl BackendOp<Backend> for MatMatFp16Op<f32> {
                         .reduce(
                             || vec![f32::default(); tm * tn],
                             |a, b| a.into_iter().zip_eq(b).map(|(a, b)| a + b).collect(),
-                        )
+                        );
+                    ((i, j), tc)
                 })
-                .collect();
-
-            let mut c = _c.make_vec();
-            for (j, i, y, x) in itertools::iproduct!(0..bn, 0..bm, 0..tn, 0..tm) {
-                c[_c.value([x, y, i, j])] = tiles[layout.value([x, y, i, j])]
-            }
-            c
+                .for_each(|((i, j), tc)| {
+                    let mut c = c.write_slice::<f32>();
+                    let _tc = Layout::from_shape([tm, tn]);
+                    for (y, x) in itertools::iproduct!(0..tn, 0..tm) {
+                        c[_c.value([x, y, i, j])] = tc[_tc.value([x, y])];
+                    }
+                });
         })
         .await;
-
-        backend.create(io[2].id, output);
     }
 }
 
