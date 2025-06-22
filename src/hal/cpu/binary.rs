@@ -1,7 +1,7 @@
 use half::f16;
 
 use crate::{
-    hal::ops::AddOp,
+    hal::ops::{AddOp, MulOp},
     loom::{
         device::{Backend as _, cpu::Backend},
         num::{F16x4, F32x4},
@@ -150,6 +150,154 @@ impl BackendOp<Backend> for AddOp<F16x4> {
             layout
                 .par_iter_indices()
                 .map(|(_, index)| x[index] + y[index])
+                .collect()
+        })
+        .await;
+
+        backend.create(io[2].id, output);
+    }
+}
+
+impl BackendOp<Backend> for MulOp<f32> {
+    async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        debug_assert_eq!(io[0].layout, io[1].layout);
+        let layout = io[0].layout.clone();
+
+        let x = backend.fetch(io[0].id);
+        let y = backend.fetch(io[1].id);
+
+        #[cfg(not(feature = "rayon"))]
+        let output: Vec<_> = handle(move || {
+            let x = x.read_slice::<f32>();
+            let y = y.read_slice::<f32>();
+
+            layout
+                .iter_indices()
+                .map(|(_, index)| x[index] * y[index])
+                .collect()
+        })
+        .await;
+        #[cfg(feature = "rayon")]
+        let output: Vec<_> = handle(move || {
+            use rayon::prelude::*;
+
+            let x = x.read_slice::<f32>();
+            let y = y.read_slice::<f32>();
+
+            layout
+                .par_iter_indices()
+                .map(|(_, index)| x[index] * y[index])
+                .collect()
+        })
+        .await;
+
+        backend.create(io[2].id, output);
+    }
+}
+
+impl BackendOp<Backend> for MulOp<f16> {
+    async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        debug_assert_eq!(io[0].layout, io[1].layout);
+        let layout = io[0].layout.clone();
+
+        let x = backend.fetch(io[0].id);
+        let y = backend.fetch(io[1].id);
+
+        #[cfg(not(feature = "rayon"))]
+        let output: Vec<_> = handle(move || {
+            let x = x.read_slice::<f16>();
+            let y = y.read_slice::<f16>();
+
+            layout
+                .iter_indices()
+                .map(|(_, index)| x[index] * y[index])
+                .collect()
+        })
+        .await;
+        #[cfg(feature = "rayon")]
+        let output: Vec<_> = handle(move || {
+            use rayon::prelude::*;
+
+            let x = x.read_slice::<f16>();
+            let y = y.read_slice::<f16>();
+
+            layout
+                .par_iter_indices()
+                .map(|(_, index)| x[index] * y[index])
+                .collect()
+        })
+        .await;
+
+        backend.create(io[2].id, output);
+    }
+}
+
+impl BackendOp<Backend> for MulOp<F32x4> {
+    async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        debug_assert_eq!(io[0].layout, io[1].layout);
+        let layout = io[0].layout.clone();
+
+        let x = backend.fetch(io[0].id);
+        let y = backend.fetch(io[1].id);
+
+        #[cfg(not(feature = "rayon"))]
+        let output: Vec<_> = handle(move || {
+            let x = x.read_slice::<F32x4>();
+            let y = y.read_slice::<F32x4>();
+
+            layout
+                .iter_indices()
+                .map(|(_, index)| x[index] * y[index])
+                .collect()
+        })
+        .await;
+        #[cfg(feature = "rayon")]
+        let output: Vec<_> = handle(move || {
+            use rayon::prelude::*;
+
+            let x = x.read_slice::<F32x4>();
+            let y = y.read_slice::<F32x4>();
+
+            layout
+                .par_iter_indices()
+                .map(|(_, index)| x[index] * y[index])
+                .collect()
+        })
+        .await;
+
+        backend.create(io[2].id, output);
+    }
+}
+
+impl BackendOp<Backend> for MulOp<F16x4> {
+    async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        debug_assert_eq!(io[0].layout, io[1].layout);
+        let layout = io[0].layout.clone();
+
+        let x = backend.fetch(io[0].id);
+        let y = backend.fetch(io[1].id);
+
+        #[cfg(not(feature = "rayon"))]
+        let output: Vec<_> = handle(move || {
+            let x = x.read_slice::<F16x4>();
+            let y = y.read_slice::<F16x4>();
+
+            layout
+                .iter_indices()
+                .map(|(_, index)| x[index] * y[index])
+                .collect()
+        })
+        .await;
+        #[cfg(feature = "rayon")]
+        let output: Vec<_> = handle(move || {
+            use rayon::prelude::*;
+
+            let x = x.read_slice::<F16x4>();
+            let y = y.read_slice::<F16x4>();
+
+            layout
+                .par_iter_indices()
+                .map(|(_, index)| x[index] * y[index])
                 .collect()
         })
         .await;

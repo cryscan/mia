@@ -20,6 +20,10 @@ impl CpuBuilder {
             .add_op::<AddOp<f16>>()
             .add_op::<AddOp<F32x4>>()
             .add_op::<AddOp<F16x4>>()
+            .add_op::<MulOp<f32>>()
+            .add_op::<MulOp<f16>>()
+            .add_op::<MulOp<F32x4>>()
+            .add_op::<MulOp<F16x4>>()
             .add_op::<SoftmaxOp<f32>>()
             .add_op::<SoftmaxOp<f16>>()
             .add_op::<LayerNormOp<f32>>()
@@ -56,6 +60,14 @@ impl<B: Backend, T: Scalar> BackendOp<B> for CreateOp<T> {
 #[derive(Debug, Clone, TensorOp)]
 #[tensor_op(crate = "crate", bound = "T: Scalar")]
 pub struct AddOp<T> {
+    #[tensor_op]
+    pub op: InnerOp<2, 1>,
+    pub phantom: PhantomData<T>,
+}
+
+#[derive(Debug, Clone, TensorOp)]
+#[tensor_op(crate = "crate", bound = "T: Scalar")]
+pub struct MulOp<T> {
     #[tensor_op]
     pub op: InnerOp<2, 1>,
     pub phantom: PhantomData<T>,

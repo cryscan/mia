@@ -4,7 +4,7 @@ use derive_more::{Deref, DerefMut};
 use half::f16;
 use mia_derive::build_api;
 
-use super::ops::{AddOp, CreateOp, LayerNormOp, MatMatFp16Op, SoftmaxOp};
+use super::ops::{AddOp, CreateOp, LayerNormOp, MatMatFp16Op, MulOp, SoftmaxOp};
 use crate::loom::{
     device::{Device, DeviceError, DeviceEvent},
     layout::{IntoLayout, Layout},
@@ -87,7 +87,25 @@ impl<D: Device + Clone, T: Scalar> std::ops::Add<Tensor<D, T>> for Tensor<D, T> 
     }
 }
 
+impl<D: Device + Clone, T: Scalar> std::ops::Mul<Tensor<D, T>> for Tensor<D, T> {
+    type Output = Tensor<D, T>;
+
+    fn mul(self, rhs: Tensor<D, T>) -> Self::Output {
+        self.try_mul(rhs).expect("tensor layouts must match")
+    }
+}
+
 impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
+    /// # Element-wise Addition (`try_add`)
+    /// Performs element-wise addition between two tensors.
+    ///
+    /// ## Arguments
+    /// * `self` - The first tensor operand
+    /// * `rhs` - The second tensor operand, must have the same layout as `self`
+    ///
+    /// ## Returns
+    /// * `Result<Self, TensorError>` - A new tensor containing the element-wise sum,
+    ///   or an error if the tensor layouts don't match
     #[inline]
     pub fn try_add(self, rhs: Tensor<D, T>) -> Result<Self, TensorError> {
         let layout = self.layout();
@@ -95,6 +113,27 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
 
         let phantom = PhantomData::<T>;
         let f = move |op| AddOp { op, phantom };
+        let output = Tensor::zeros_like(&self);
+        Ok(build_api_2(f, output, self, rhs))
+    }
+
+    /// # Element-wise Multiplication (`try_mul`)
+    /// Performs element-wise multiplication between two tensors.
+    ///
+    /// ## Arguments
+    /// * `self` - The first tensor operand
+    /// * `rhs` - The second tensor operand, must have the same layout as `self`
+    ///
+    /// ## Returns
+    /// * `Result<Self, TensorError>` - A new tensor containing the element-wise product,
+    ///   or an error if the tensor layouts don't match
+    #[inline]
+    pub fn try_mul(self, rhs: Tensor<D, T>) -> Result<Self, TensorError> {
+        let layout = self.layout();
+        let rhs = rhs.check_layout(layout)?;
+
+        let phantom = PhantomData::<T>;
+        let f = move |op| MulOp { op, phantom };
         let output = Tensor::zeros_like(&self);
         Ok(build_api_2(f, output, self, rhs))
     }
