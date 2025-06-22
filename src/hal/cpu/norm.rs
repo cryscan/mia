@@ -1,7 +1,7 @@
 use half::f16;
 
 use crate::{
-    hal::ops::{LayerNormOp, SoftmaxOp},
+    hal::ops::{L2NormOp, LayerNormOp, SoftmaxOp},
     loom::{
         device::{Backend as _, cpu::Backend},
         ops::{BackendOp, TensorIr},
@@ -359,6 +359,127 @@ impl BackendOp<Backend> for LayerNormOp<f16> {
     }
 }
 
+impl BackendOp<Backend> for L2NormOp<f32> {
+    async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        let eps = self.eps;
+        let layout = io[0].layout.pad_to(2);
+        let x = backend.fetch(io[0].id);
+
+        #[cfg(not(feature = "rayon"))]
+        let output: Vec<_> = handle(move || {
+            let (lo, hi) = layout.split_at(1);
+            hi.iter_indices()
+                .flat_map(|(_, hi)| {
+                    let x = x.read_slice::<f32>();
+
+                    // calculate L2 norm: sqrt(sum(x^2) + eps)
+                    let norm_squared: f32 = lo
+                        .iter_indices()
+                        .map(|(_, lo)| x[lo + hi])
+                        .map(|v| v * v)
+                        .sum();
+                    let norm = (norm_squared + eps).sqrt();
+
+                    // normalize each element by the L2 norm
+                    lo.iter_indices().map(move |(_, lo)| x[lo + hi] / norm)
+                })
+                .collect()
+        })
+        .await;
+
+        #[cfg(feature = "rayon")]
+        let output: Vec<_> = handle(move || {
+            use rayon::prelude::*;
+
+            let (lo, hi) = layout.split_at(1);
+            hi.par_iter_indices()
+                .flat_map(|(_, hi)| {
+                    // calculate L2 norm: sqrt(sum(x^2) + eps)
+                    let norm_squared: f32 = lo
+                        .par_iter_indices()
+                        .map(|(_, lo)| x.read_slice::<f32>()[lo + hi])
+                        .map(|v| v * v)
+                        .sum();
+                    let norm = (norm_squared + eps).sqrt();
+
+                    let x = x.clone();
+                    // normalize each element by the L2 norm
+                    lo.par_iter_indices()
+                        .map(move |(_, lo)| x.read_slice::<f32>()[lo + hi] / norm)
+                })
+                .collect()
+        })
+        .await;
+
+        backend.create(io[1].id, output);
+    }
+}
+
+impl BackendOp<Backend> for L2NormOp<f16> {
+    async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        let eps = self.eps;
+        let layout = io[0].layout.pad_to(2);
+        let x = backend.fetch(io[0].id);
+
+        #[cfg(not(feature = "rayon"))]
+        let output: Vec<_> = handle(move || {
+            let (lo, hi) = layout.split_at(1);
+            hi.iter_indices()
+                .flat_map(|(_, hi)| {
+                    let x = x.read_slice::<f16>();
+
+                    // calculate L2 norm: sqrt(sum(x^2) + eps)
+                    // convert to f32 for computation precision
+                    let norm_squared: f32 = lo
+                        .iter_indices()
+                        .map(|(_, lo)| x[lo + hi])
+                        .map(f16::to_f32)
+                        .map(|v| v * v)
+                        .sum();
+                    let norm = (norm_squared + eps).sqrt();
+
+                    // normalize each element by the L2 norm
+                    lo.iter_indices().map(move |(_, lo)| {
+                        let val = f16::to_f32(x[lo + hi]);
+                        f16::from_f32(val / norm)
+                    })
+                })
+                .collect()
+        })
+        .await;
+
+        #[cfg(feature = "rayon")]
+        let output: Vec<_> = handle(move || {
+            use rayon::prelude::*;
+
+            let (lo, hi) = layout.split_at(1);
+            hi.par_iter_indices()
+                .flat_map(|(_, hi)| {
+                    // calculate L2 norm: sqrt(sum(x^2) + eps)
+                    // convert to f32 for computation precision
+                    let norm_squared: f32 = lo
+                        .par_iter_indices()
+                        .map(|(_, lo)| x.read_slice::<f16>()[lo + hi])
+                        .map(f16::to_f32)
+                        .map(|v| v * v)
+                        .sum();
+                    let norm = (norm_squared + eps).sqrt();
+
+                    let x = x.clone();
+                    // normalize each element by the L2 norm
+                    lo.par_iter_indices().map(move |(_, lo)| {
+                        let val = f16::to_f32(x.read_slice::<f16>()[lo + hi]);
+                        f16::from_f32(val / norm)
+                    })
+                })
+                .collect()
+        })
+        .await;
+
+        backend.create(io[1].id, output);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{error::Error, sync::Arc};
@@ -606,6 +727,87 @@ mod tests {
 
         for (index, (&a, &b)) in output.iter().zip_eq(r#ref.iter()).enumerate() {
             assert_approx_eq!(index, a, b, 1e-2);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_l2_norm_f32() -> Result<(), Box<dyn Error>> {
+        fastrand::seed(42);
+
+        let cpu = CpuBuilder::new().add_default_ops().build().await;
+        const C: usize = 1024;
+        const T: usize = 768;
+        const EPS: f32 = 1.0e-5;
+
+        let x_data: Arc<_> = (0..T)
+            .cartesian_product(0..C)
+            .map(|(t, c)| fastrand::f32() * t as f32 + fastrand::f32() * c as f32)
+            .collect();
+        let x = Tensor::create(cpu.clone(), [C, T], x_data.clone())?;
+
+        let y = x.l2_norm(EPS);
+        let output = y.back().await?;
+
+        let mut r#ref = Vec::with_capacity(T * C);
+        for i in 0..T {
+            let start = i * C;
+            let chunk = &x_data[start..start + C];
+
+            // calculate L2 norm: sqrt(sum(x^2) + eps)
+            let sum_squares: f32 = chunk.iter().map(|&x| x * x).sum();
+            let l2_norm = (sum_squares + EPS).sqrt();
+
+            // normalize each element by the L2 norm
+            for &x in chunk {
+                r#ref.push(x / l2_norm);
+            }
+        }
+
+        for (index, (&a, &b)) in output.iter().zip_eq(r#ref.iter()).enumerate() {
+            assert_approx_eq!(index, a, b, 1e-5);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_l2_norm_f16() -> Result<(), Box<dyn Error>> {
+        fastrand::seed(42);
+
+        let cpu = CpuBuilder::new().add_default_ops().build().await;
+        const C: usize = 1024;
+        const T: usize = 768;
+        const EPS: f32 = 1.0e-5;
+
+        let x_data: Arc<_> = (0..T)
+            .cartesian_product(0..C)
+            .map(|(t, c)| fastrand::f32() * t as f32 + fastrand::f32() * c as f32)
+            .map(f16::from_f32)
+            .collect();
+        let x = Tensor::create(cpu.clone(), [C, T], x_data.clone())?;
+
+        let y = x.l2_norm(EPS);
+        let output = y.back().await?;
+
+        let mut r#ref = Vec::with_capacity(T * C);
+        for i in 0..T {
+            let start = i * C;
+            let chunk = &x_data[start..start + C];
+
+            // calculate L2 norm: sqrt(sum(x^2) + eps)
+            let sum_squares: f32 = chunk.iter().map(|&x| f16::to_f32(x)).map(|x| x * x).sum();
+            let l2_norm = (sum_squares + EPS).sqrt();
+
+            // normalize each element by the L2 norm
+            for &x in chunk {
+                r#ref.push(f16::from_f32(f16::to_f32(x) / l2_norm));
+            }
+        }
+
+        for (index, (&a, &b)) in output.iter().zip_eq(r#ref.iter()).enumerate() {
+            assert_approx_eq!(index, f16::to_f32(a), f16::to_f32(b), 1e-3);
         }
 
         Ok(())

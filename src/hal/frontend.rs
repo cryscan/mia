@@ -4,7 +4,7 @@ use derive_more::{Deref, DerefMut};
 use half::f16;
 use mia_derive::build_api;
 
-use super::ops::{AddOp, CreateOp, LayerNormOp, MatMatFp16Op, MulOp, SoftmaxOp};
+use super::ops::{AddOp, CreateOp, L2NormOp, LayerNormOp, MatMatFp16Op, MulOp, SoftmaxOp};
 use crate::loom::{
     device::{Device, DeviceError, DeviceEvent},
     layout::{IntoLayout, Layout},
@@ -183,6 +183,23 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
         let f = |op| LayerNormOp { op, eps, phantom };
         let output = Tensor::zeros_like(&self);
         Ok(build_api_3(f, output, self, w, b))
+    }
+
+    /// # L2 Normalization (`l2_norm`)
+    /// Performs L2 normalization on the input tensor, normalizing each vector to unit length.
+    ///
+    /// ## Arguments
+    /// * `self` - The input tensor to normalize.
+    /// * `eps` - A small value added to the norm to avoid division by zero.
+    ///
+    /// ## Returns
+    /// * `Self` - A new tensor with the same shape as the input, where each vector is normalized to unit length.
+    #[inline]
+    pub fn l2_norm(self, eps: f32) -> Self {
+        let phantom = PhantomData::<T>;
+        let f = |op| L2NormOp { op, eps, phantom };
+        let output = Tensor::zeros_like(&self);
+        build_api_1(f, output, self)
     }
 }
 

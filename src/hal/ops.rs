@@ -28,6 +28,8 @@ impl CpuBuilder {
             .add_op::<SoftmaxOp<f16>>()
             .add_op::<LayerNormOp<f32>>()
             .add_op::<LayerNormOp<f16>>()
+            .add_op::<L2NormOp<f32>>()
+            .add_op::<L2NormOp<f16>>()
             .add_op::<MatMatFp16Op<f16>>()
             .add_op::<MatMatFp16Op<f32>>()
     }
@@ -86,6 +88,15 @@ pub struct SoftmaxOp<T> {
 pub struct LayerNormOp<T> {
     #[tensor_op]
     pub op: InnerOp<3, 1>,
+    pub eps: f32,
+    pub phantom: PhantomData<T>,
+}
+
+#[derive(Debug, Clone, TensorOp)]
+#[tensor_op(crate = "crate", bound = "T: Scalar")]
+pub struct L2NormOp<T> {
+    #[tensor_op]
+    pub op: InnerOp<1, 1>,
     pub eps: f32,
     pub phantom: PhantomData<T>,
 }
