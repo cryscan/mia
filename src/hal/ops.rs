@@ -32,6 +32,8 @@ impl CpuBuilder {
             .add_op::<L2NormOp<f16>>()
             .add_op::<MatMatFp16Op<f16>>()
             .add_op::<MatMatFp16Op<f32>>()
+            .add_op::<MatVecFp16Op<f16>>()
+            .add_op::<MatVecFp16Op<f32>>()
     }
 }
 

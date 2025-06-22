@@ -1,7 +1,7 @@
 use half::f16;
 
 use crate::{
-    hal::ops::MatMatFp16Op,
+    hal::ops::{MatMatFp16Op, MatVecFp16Op},
     loom::{
         device::{
             Backend as _,
@@ -18,7 +18,7 @@ impl BackendOp<Backend> for MatMatFp16Op<f16> {
         let [_a, _b, _c] = self.layouts.clone();
         let [tk, tm, bk, bm] = _a.shape().to_array();
         let [_, tn, _, bn] = _b.shape().to_array();
-        assert_eq!([tm, tn, bm, bn], _c.shape().to_array::<4>());
+        assert_eq!([tm, tn, bm, bn], _c.shape().to_array());
 
         let a = backend.fetch(io[0].id);
         let b = backend.fetch(io[1].id);
@@ -101,7 +101,7 @@ impl BackendOp<Backend> for MatMatFp16Op<f32> {
         let [_a, _b, _c] = self.layouts.clone();
         let [tk, tm, bk, bm] = _a.shape().to_array();
         let [_, tn, _, bn] = _b.shape().to_array();
-        assert_eq!([tm, tn, bm, bn], _c.shape().to_array::<4>());
+        assert_eq!([tm, tn, bm, bn], _c.shape().to_array());
 
         let a = backend.fetch(io[0].id);
         let b = backend.fetch(io[1].id);
@@ -184,6 +184,90 @@ impl BackendOp<Backend> for MatMatFp16Op<f32> {
     }
 }
 
+impl BackendOp<Backend> for MatVecFp16Op<f16> {
+    async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        let [_a, _b, _c] = self.layouts.clone();
+        let [k, m] = _a.shape().to_array();
+        let [_, n] = _b.shape().to_array();
+        assert_eq!([m, n], _c.shape().to_array());
+
+        let a = backend.fetch(io[0].id);
+        let b = backend.fetch(io[1].id);
+
+        #[cfg(not(feature = "rayon"))]
+        let output: Vec<_> = handle(move || {
+            let a = a.read_layout::<F16x4>(&_a);
+            let b = b.read_layout::<F16x4>(&_b);
+            itertools::izip!(0..n, 0..m)
+                .map(|(y, x)| (0..k).fold(f16::default(), |c, z| c + a[[z, x]].dot(b[[z, y]])))
+                .collect()
+        })
+        .await;
+        #[cfg(feature = "rayon")]
+        let output: Vec<_> = handle(move || {
+            use rayon::prelude::*;
+
+            let a = a.read_layout::<F16x4>(&_a);
+            let b = b.read_layout::<F16x4>(&_b);
+            itertools::izip!(0..n, 0..m)
+                .collect::<Vec<_>>()
+                .into_par_iter()
+                .map(|(y, x)| {
+                    (0..k)
+                        .into_par_iter()
+                        .fold(f16::default, |c, z| c + a[[z, x]].dot(b[[z, y]]))
+                        .reduce(f16::default, |x, y| x + y)
+                })
+                .collect()
+        })
+        .await;
+
+        backend.create(io[2].id, output);
+    }
+}
+
+impl BackendOp<Backend> for MatVecFp16Op<f32> {
+    async fn execute(&self, backend: &mut Backend, io: Vec<TensorIr>) {
+        let [_a, _b, _c] = self.layouts.clone();
+        let [k, m] = _a.shape().to_array();
+        let [_, n] = _b.shape().to_array();
+        assert_eq!([m, n], _c.shape().to_array());
+
+        let a = backend.fetch(io[0].id);
+        let b = backend.fetch(io[1].id);
+
+        #[cfg(not(feature = "rayon"))]
+        let output: Vec<_> = handle(move || {
+            let a = a.read_layout::<F16x4>(&_a);
+            let b = b.read_layout::<F32x4>(&_b);
+            itertools::izip!(0..n, 0..m)
+                .map(|(y, x)| (0..k).fold(0.0, |c, z| c + a[[z, x]].to_f32().dot(b[[z, y]])))
+                .collect()
+        })
+        .await;
+        #[cfg(feature = "rayon")]
+        let output: Vec<_> = handle(move || {
+            use rayon::prelude::*;
+
+            let a = a.read_layout::<F16x4>(&_a);
+            let b = b.read_layout::<F32x4>(&_b);
+            itertools::izip!(0..n, 0..m)
+                .collect::<Vec<_>>()
+                .into_par_iter()
+                .map(|(y, x)| {
+                    (0..k)
+                        .into_par_iter()
+                        .fold(f32::default, |c, z| c + a[[z, x]].to_f32().dot(b[[z, y]]))
+                        .reduce(f32::default, |x, y| x + y)
+                })
+                .collect()
+        })
+        .await;
+
+        backend.create(io[2].id, output);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{error::Error, sync::Arc};
@@ -209,7 +293,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_matmul_f16_f16() -> Result<(), Box<dyn Error>> {
+    async fn test_matmul_mat_f16_f16() -> Result<(), Box<dyn Error>> {
         fastrand::seed(42);
 
         let cpu = CpuBuilder::new().add_default_ops().build().await;
@@ -259,7 +343,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_matmul_f16_f32() -> Result<(), Box<dyn Error>> {
+    async fn test_matmul_mat_f16_f32() -> Result<(), Box<dyn Error>> {
         fastrand::seed(42);
 
         let cpu = CpuBuilder::new().add_default_ops().build().await;

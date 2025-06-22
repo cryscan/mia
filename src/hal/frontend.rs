@@ -5,12 +5,15 @@ use half::f16;
 use mia_derive::build_api;
 
 use super::ops::{AddOp, CreateOp, L2NormOp, LayerNormOp, MatMatFp16Op, MulOp, SoftmaxOp};
-use crate::loom::{
-    device::{Device, DeviceError, DeviceEvent},
-    layout::{IntoLayout, Layout},
-    num::{F16x4, Float, Scalar},
-    ops::{Access, InnerOp, Mermaid, OneOp, TensorOp},
-    tensor::{Tensor, TensorError},
+use crate::{
+    hal::ops::MatVecFp16Op,
+    loom::{
+        device::{Device, DeviceError, DeviceEvent},
+        layout::{IntoLayout, Layout},
+        num::{F16x4, Float, Scalar},
+        ops::{Access, InnerOp, Mermaid, OneOp, TensorOp},
+        tensor::{Tensor, TensorError},
+    },
 };
 
 build_api!(1);
@@ -244,20 +247,31 @@ impl<D: Device + Clone> MatrixFp16<D> {
             Layout::from_shape([k, n]),
             Layout::from_shape([m, n]),
         ];
-        let layouts = [
-            layouts[0].div_tiler([(bk, 1), (bm, 1)])?,
-            layouts[1].div_tiler([(bk, 1), (bn, 1)])?,
-            layouts[2].div_tiler([(bm, 1), (bn, 1)])?,
-        ];
 
         let phantom = PhantomData::<T>;
-        let f = |op| MatMatFp16Op {
-            op,
-            phantom,
-            layouts,
-        };
-        let device = lhs.device().clone();
-        let output = Tensor::zeros(device, [m, n]);
-        Ok(build_api_2(f, output, lhs, rhs))
+        if n % bn == 0 {
+            let layouts = [
+                layouts[0].div_tiler([(bk, 1), (bm, 1)])?,
+                layouts[1].div_tiler([(bk, 1), (bn, 1)])?,
+                layouts[2].div_tiler([(bm, 1), (bn, 1)])?,
+            ];
+            let f = |op| MatMatFp16Op {
+                op,
+                phantom,
+                layouts,
+            };
+            let device = lhs.device().clone();
+            let output = Tensor::zeros(device, [m, n]);
+            Ok(build_api_2(f, output, lhs, rhs))
+        } else {
+            let f = |op| MatVecFp16Op {
+                op,
+                phantom,
+                layouts,
+            };
+            let device = lhs.device().clone();
+            let output = Tensor::zeros(device, [m, n]);
+            Ok(build_api_2(f, output, lhs, rhs))
+        }
     }
 }
