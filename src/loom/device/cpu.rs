@@ -182,17 +182,6 @@ pub struct LayoutBufferReader<R, T> {
 
 impl<R, T> LayoutBufferReader<R, T> {
     #[inline]
-    pub fn new(inner: R, layout: impl IntoLayout) -> Self {
-        let layout = layout.into_layout();
-        let phantom = PhantomData;
-        Self {
-            inner,
-            layout,
-            phantom,
-        }
-    }
-
-    #[inline]
     pub fn into_inner(self) -> R {
         self.inner
     }
@@ -234,17 +223,6 @@ pub struct LayoutBufferWriter<R, T> {
 }
 
 impl<R, T> LayoutBufferWriter<R, T> {
-    #[inline]
-    pub fn new(inner: R, layout: impl IntoLayout) -> Self {
-        let layout = layout.into_layout();
-        let phantom = PhantomData;
-        Self {
-            inner,
-            layout,
-            phantom,
-        }
-    }
-
     #[inline]
     pub fn into_inner(self) -> R {
         self.inner
@@ -300,29 +278,31 @@ where
     }
 }
 
-#[inline]
-pub fn make_buffer<T: Scalar>(layout: impl IntoLayout) -> LayoutBufferWriter<Box<[T]>, T> {
-    let layout = layout.into_layout();
-    let inner = vec![T::zero(); layout.co_size()].into_boxed_slice();
-    let phantom = PhantomData;
-    LayoutBufferWriter {
-        inner,
-        layout,
-        phantom,
-    }
-}
+pub type LayoutBuffer<T> = LayoutBufferWriter<Box<[T]>, T>;
 
-pub fn form_buffer<T: Scalar>(
-    buffer: Box<[T]>,
-    layout: impl IntoLayout,
-) -> LayoutBufferWriter<Box<[T]>, T> {
-    let inner = buffer;
-    let layout = layout.into_layout();
-    let phantom = PhantomData;
-    LayoutBufferWriter {
-        inner,
-        layout,
-        phantom,
+impl<T: Scalar> LayoutBuffer<T> {
+    #[inline]
+    pub fn new(layout: impl IntoLayout) -> Self {
+        let layout = layout.into_layout();
+        let inner = vec![T::zero(); layout.co_size()].into_boxed_slice();
+        let phantom = PhantomData;
+        Self {
+            inner,
+            layout,
+            phantom,
+        }
+    }
+
+    #[inline]
+    pub fn from_data(data: Box<[T]>, layout: impl IntoLayout) -> Self {
+        let layout = layout.into_layout();
+        let inner = data;
+        let phantom = PhantomData;
+        Self {
+            inner,
+            layout,
+            phantom,
+        }
     }
 }
 

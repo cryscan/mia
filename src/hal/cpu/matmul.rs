@@ -5,9 +5,8 @@ use crate::{
     loom::{
         device::{
             Backend as _,
-            cpu::{Backend, make_buffer},
+            cpu::{Backend, LayoutBuffer},
         },
-        layout::Layout,
         num::{F16x4, F32x4},
         ops::{BackendOp, TensorIr},
         platform::handle,
@@ -23,7 +22,7 @@ impl BackendOp<Backend> for MatMatFp16Op<f16> {
 
         let a = backend.fetch(io[0].id);
         let b = backend.fetch(io[1].id);
-        let c = backend.create(io[2].id, make_buffer::<f16>(&_c));
+        let c = backend.create(io[2].id, LayoutBuffer::<f16>::new(&_c));
 
         #[cfg(not(feature = "rayon"))]
         handle(move || {
@@ -32,10 +31,8 @@ impl BackendOp<Backend> for MatMatFp16Op<f16> {
             let mut c = c.write_layout::<f16>(&_c);
 
             for (j, i, k) in itertools::iproduct!(0..bn, 0..bm, 0..bk) {
-                let _ta = Layout::from_shape([tk, tm]);
-                let _tb = Layout::from_shape([tk, tn]);
-                let mut ta = make_buffer::<F16x4>(&_ta);
-                let mut tb = make_buffer::<F16x4>(&_tb);
+                let mut ta = LayoutBuffer::<F16x4>::new([tk, tm]);
+                let mut tb = LayoutBuffer::<F16x4>::new([tk, tn]);
 
                 for (y, x) in itertools::iproduct!(0..tm, 0..tk) {
                     ta[[x, y]] = a[[x, y, k, i]];
@@ -53,27 +50,21 @@ impl BackendOp<Backend> for MatMatFp16Op<f16> {
         .await;
         #[cfg(feature = "rayon")]
         handle(move || {
-            use itertools::Itertools;
             use rayon::prelude::*;
-
-            use crate::loom::device::cpu::form_buffer;
 
             let a = a.read_layout::<F16x4>(&_a);
             let b = b.read_layout::<F16x4>(&_b);
 
-            (0..bn)
-                .cartesian_product(0..bm)
+            itertools::iproduct!(0..bn, 0..bm)
                 .collect::<Vec<_>>()
                 .into_par_iter()
                 .map(|(j, i)| {
                     let tc = (0..bk)
                         .into_par_iter()
                         .map(|k| {
-                            let _ta = Layout::from_shape([tk, tm]);
-                            let _tb = Layout::from_shape([tk, tn]);
-                            let mut ta = make_buffer::<F16x4>(&_ta);
-                            let mut tb = make_buffer::<F16x4>(&_tb);
-                            let mut tc = make_buffer::<f16>(&Layout::from_shape([tm, tn]));
+                            let mut ta = LayoutBuffer::<F16x4>::new([tk, tm]);
+                            let mut tb = LayoutBuffer::<F16x4>::new([tk, tn]);
+                            let mut tc = LayoutBuffer::<f16>::new([tm, tn]);
 
                             for (y, x) in itertools::iproduct!(0..tm, 0..tk) {
                                 ta[[x, y]] = a[[x, y, k, i]];
@@ -90,9 +81,9 @@ impl BackendOp<Backend> for MatMatFp16Op<f16> {
                         })
                         .reduce(
                             || vec![f16::default(); tm * tn].into_boxed_slice(),
-                            |a, b| a.into_iter().zip_eq(b).map(|(a, b)| a + b).collect(),
+                            |a, b| itertools::izip!(a, b).map(|(a, b)| a + b).collect(),
                         );
-                    ((i, j), form_buffer(tc, [tm, tn]))
+                    ((i, j), LayoutBuffer::from_data(tc, [tm, tn]))
                 })
                 .for_each(|((i, j), tc)| {
                     let mut c = c.write_layout::<f16>(&_c);
@@ -114,7 +105,7 @@ impl BackendOp<Backend> for MatMatFp16Op<f32> {
 
         let a = backend.fetch(io[0].id);
         let b = backend.fetch(io[1].id);
-        let c = backend.create(io[2].id, make_buffer::<f32>(&_c));
+        let c = backend.create(io[2].id, LayoutBuffer::<f32>::new(&_c));
 
         #[cfg(not(feature = "rayon"))]
         handle(move || {
@@ -123,10 +114,8 @@ impl BackendOp<Backend> for MatMatFp16Op<f32> {
             let mut c = c.write_layout::<f32>(_c);
 
             for (j, i, k) in itertools::iproduct!(0..bn, 0..bm, 0..bk) {
-                let _ta = Layout::from_shape([tk, tm]);
-                let _tb = Layout::from_shape([tk, tn]);
-                let mut ta = make_buffer(_ta);
-                let mut tb = make_buffer(_tb);
+                let mut ta = LayoutBuffer::<F16x4>::new([tk, tm]);
+                let mut tb = LayoutBuffer::<F32x4>::new([tk, tn]);
 
                 for (y, x) in itertools::iproduct!(0..tm, 0..tk) {
                     ta[[x, y]] = a[[x, y, k, i]]
@@ -144,13 +133,10 @@ impl BackendOp<Backend> for MatMatFp16Op<f32> {
         .await;
         #[cfg(feature = "rayon")]
         handle(move || {
-            use itertools::Itertools;
             use rayon::prelude::*;
 
-            use crate::loom::device::cpu::form_buffer;
-
             itertools::iproduct!(0..bn, 0..bm)
-                .collect_vec()
+                .collect::<Vec<_>>()
                 .into_par_iter()
                 .map(move |(j, i)| {
                     let _a = _a.clone();
@@ -161,12 +147,9 @@ impl BackendOp<Backend> for MatMatFp16Op<f32> {
                     let tc = (0..bk)
                         .into_par_iter()
                         .map(move |k| {
-                            let _ta = Layout::from_shape([tk, tm]);
-                            let _tb = Layout::from_shape([tk, tn]);
-                            let _tc = Layout::from_shape([tm, tn]);
-                            let mut ta = make_buffer(_ta);
-                            let mut tb = make_buffer(_tb);
-                            let mut tc = make_buffer(_tc);
+                            let mut ta = LayoutBuffer::<F16x4>::new([tk, tm]);
+                            let mut tb = LayoutBuffer::<F32x4>::new([tk, tn]);
+                            let mut tc = LayoutBuffer::<f32>::new([tm, tn]);
 
                             let a = a.read_layout::<F16x4>(&_a);
                             let b = b.read_layout::<F32x4>(&_b);
@@ -186,9 +169,9 @@ impl BackendOp<Backend> for MatMatFp16Op<f32> {
                         })
                         .reduce(
                             || vec![f32::default(); tm * tn].into_boxed_slice(),
-                            |a, b| a.into_iter().zip_eq(b).map(|(a, b)| a + b).collect(),
+                            |a, b| itertools::izip!(a, b).map(|(a, b)| a + b).collect(),
                         );
-                    ((i, j), form_buffer(tc, [tm, tn]))
+                    ((i, j), LayoutBuffer::from_data(tc, [tm, tn]))
                 })
                 .for_each(|((i, j), tc)| {
                     let mut c = c.write_layout::<f32>(&_c);
