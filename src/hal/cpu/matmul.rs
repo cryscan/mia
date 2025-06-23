@@ -22,7 +22,7 @@ impl BackendOp<Backend> for MatMatFp16Op<f16> {
 
         let a = backend.fetch(io[0].id);
         let b = backend.fetch(io[1].id);
-        let c = backend.create(io[2].id, LayoutBuffer::<f16>::new(&_c));
+        let c = backend.create(io[2].id, LayoutBuffer::<_, f16>::new(&_c));
 
         #[cfg(not(feature = "rayon"))]
         handle(move || {
@@ -31,8 +31,8 @@ impl BackendOp<Backend> for MatMatFp16Op<f16> {
             let mut c = c.write_layout::<f16>(&_c);
 
             for (j, i, k) in itertools::iproduct!(0..bn, 0..bm, 0..bk) {
-                let mut ta = LayoutBuffer::<F16x4>::new([tk, tm]);
-                let mut tb = LayoutBuffer::<F16x4>::new([tk, tn]);
+                let mut ta = LayoutBuffer::<_, F16x4>::new([tk, tm]);
+                let mut tb = LayoutBuffer::<_, F16x4>::new([tk, tn]);
 
                 for (y, x) in itertools::iproduct!(0..tm, 0..tk) {
                     ta[[x, y]] = a[[x, y, k, i]];
@@ -62,9 +62,9 @@ impl BackendOp<Backend> for MatMatFp16Op<f16> {
                     let tc = (0..bk)
                         .into_par_iter()
                         .map(|k| {
-                            let mut ta = LayoutBuffer::<F16x4>::new([tk, tm]);
-                            let mut tb = LayoutBuffer::<F16x4>::new([tk, tn]);
-                            let mut tc = LayoutBuffer::<f16>::new([tm, tn]);
+                            let mut ta = LayoutBuffer::<_, F16x4>::new([tk, tm]);
+                            let mut tb = LayoutBuffer::<_, F16x4>::new([tk, tn]);
+                            let mut tc = LayoutBuffer::<_, f16>::new([tm, tn]);
 
                             for (y, x) in itertools::iproduct!(0..tm, 0..tk) {
                                 ta[[x, y]] = a[[x, y, k, i]];
@@ -105,7 +105,7 @@ impl BackendOp<Backend> for MatMatFp16Op<f32> {
 
         let a = backend.fetch(io[0].id);
         let b = backend.fetch(io[1].id);
-        let c = backend.create(io[2].id, LayoutBuffer::<f32>::new(&_c));
+        let c = backend.create(io[2].id, LayoutBuffer::<_, f32>::new(&_c));
 
         #[cfg(not(feature = "rayon"))]
         handle(move || {
@@ -114,8 +114,8 @@ impl BackendOp<Backend> for MatMatFp16Op<f32> {
             let mut c = c.write_layout::<f32>(_c);
 
             for (j, i, k) in itertools::iproduct!(0..bn, 0..bm, 0..bk) {
-                let mut ta = LayoutBuffer::<F16x4>::new([tk, tm]);
-                let mut tb = LayoutBuffer::<F32x4>::new([tk, tn]);
+                let mut ta = LayoutBuffer::<_, F16x4>::new([tk, tm]);
+                let mut tb = LayoutBuffer::<_, F32x4>::new([tk, tn]);
 
                 for (y, x) in itertools::iproduct!(0..tm, 0..tk) {
                     ta[[x, y]] = a[[x, y, k, i]]
@@ -147,9 +147,9 @@ impl BackendOp<Backend> for MatMatFp16Op<f32> {
                     let tc = (0..bk)
                         .into_par_iter()
                         .map(move |k| {
-                            let mut ta = LayoutBuffer::<F16x4>::new([tk, tm]);
-                            let mut tb = LayoutBuffer::<F32x4>::new([tk, tn]);
-                            let mut tc = LayoutBuffer::<f32>::new([tm, tn]);
+                            let mut ta = LayoutBuffer::<_, F16x4>::new([tk, tm]);
+                            let mut tb = LayoutBuffer::<_, F32x4>::new([tk, tn]);
+                            let mut tc = LayoutBuffer::<_, f32>::new([tm, tn]);
 
                             let a = a.read_layout::<F16x4>(&_a);
                             let b = b.read_layout::<F32x4>(&_b);

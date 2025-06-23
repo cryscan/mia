@@ -83,11 +83,11 @@ impl Buffer {
     pub fn read_layout<T: Scalar>(
         &self,
         layout: impl IntoLayout,
-    ) -> LayoutBufferReader<impl Deref<Target = [T]>, T> {
+    ) -> LayoutBuffer<impl Deref<Target = [T]>, T> {
         let inner = self.read_slice::<T>();
         let layout = layout.into_layout();
         let phantom = PhantomData::<T>;
-        LayoutBufferReader {
+        LayoutBuffer {
             inner,
             layout,
             phantom,
@@ -98,11 +98,11 @@ impl Buffer {
     pub fn write_layout<T: Scalar>(
         &self,
         layout: impl IntoLayout,
-    ) -> LayoutBufferWriter<impl DerefMut<Target = [T]>, T> {
+    ) -> LayoutBuffer<impl DerefMut<Target = [T]>, T> {
         let inner = self.write_slice::<T>();
         let layout = layout.into_layout();
         let phantom = PhantomData::<T>;
-        LayoutBufferWriter {
+        LayoutBuffer {
             inner,
             layout,
             phantom,
@@ -174,13 +174,13 @@ where
     }
 }
 
-pub struct LayoutBufferReader<R, T> {
+pub struct LayoutBuffer<R, T> {
     inner: R,
     layout: Layout,
     phantom: PhantomData<T>,
 }
 
-impl<R, T> LayoutBufferReader<R, T> {
+impl<R, T> LayoutBuffer<R, T> {
     #[inline]
     pub fn into_inner(self) -> R {
         self.inner
@@ -192,7 +192,7 @@ impl<R, T> LayoutBufferReader<R, T> {
     }
 }
 
-impl<R, T> std::ops::Deref for LayoutBufferReader<R, T>
+impl<R, T> std::ops::Deref for LayoutBuffer<R, T>
 where
     R: Deref<Target = [T]>,
     T: Scalar,
@@ -204,49 +204,7 @@ where
     }
 }
 
-impl<const N: usize, R, T> std::ops::Index<[usize; N]> for LayoutBufferReader<R, T>
-where
-    R: Deref<Target = [T]>,
-    T: Scalar,
-{
-    type Output = T;
-
-    fn index(&self, index: [usize; N]) -> &Self::Output {
-        &self.inner[self.layout.value(index)]
-    }
-}
-
-pub struct LayoutBufferWriter<R, T> {
-    inner: R,
-    layout: Layout,
-    phantom: PhantomData<T>,
-}
-
-impl<R, T> LayoutBufferWriter<R, T> {
-    #[inline]
-    pub fn into_inner(self) -> R {
-        self.inner
-    }
-
-    #[inline]
-    pub fn layout(&self) -> Layout {
-        self.layout.clone()
-    }
-}
-
-impl<R, T> std::ops::Deref for LayoutBufferWriter<R, T>
-where
-    R: Deref<Target = [T]>,
-    T: Scalar,
-{
-    type Target = [T];
-
-    fn deref(&self) -> &Self::Target {
-        self.inner.deref()
-    }
-}
-
-impl<R, T> std::ops::DerefMut for LayoutBufferWriter<R, T>
+impl<R, T> std::ops::DerefMut for LayoutBuffer<R, T>
 where
     R: DerefMut<Target = [T]>,
     T: Scalar,
@@ -256,7 +214,7 @@ where
     }
 }
 
-impl<const N: usize, R, T> std::ops::Index<[usize; N]> for LayoutBufferWriter<R, T>
+impl<const N: usize, R, T> std::ops::Index<[usize; N]> for LayoutBuffer<R, T>
 where
     R: Deref<Target = [T]>,
     T: Scalar,
@@ -268,7 +226,7 @@ where
     }
 }
 
-impl<const N: usize, R, T> std::ops::IndexMut<[usize; N]> for LayoutBufferWriter<R, T>
+impl<const N: usize, R, T> std::ops::IndexMut<[usize; N]> for LayoutBuffer<R, T>
 where
     R: DerefMut<Target = [T]>,
     T: Scalar,
@@ -278,9 +236,7 @@ where
     }
 }
 
-pub type LayoutBuffer<T> = LayoutBufferWriter<Box<[T]>, T>;
-
-impl<T: Scalar> LayoutBuffer<T> {
+impl<T: Scalar> LayoutBuffer<Box<[T]>, T> {
     #[inline]
     pub fn new(layout: impl IntoLayout) -> Self {
         let layout = layout.into_layout();
@@ -306,14 +262,8 @@ impl<T: Scalar> LayoutBuffer<T> {
     }
 }
 
-impl<T: Scalar> From<LayoutBufferReader<Box<[T]>, T>> for Cow<'_, [T]> {
-    fn from(value: LayoutBufferReader<Box<[T]>, T>) -> Self {
-        Cow::Owned(value.inner.into_vec())
-    }
-}
-
-impl<T: Scalar> From<LayoutBufferWriter<Box<[T]>, T>> for Cow<'_, [T]> {
-    fn from(value: LayoutBufferWriter<Box<[T]>, T>) -> Self {
+impl<T: Scalar> From<LayoutBuffer<Box<[T]>, T>> for Cow<'_, [T]> {
+    fn from(value: LayoutBuffer<Box<[T]>, T>) -> Self {
         Cow::Owned(value.inner.into_vec())
     }
 }
