@@ -99,7 +99,7 @@ impl<D: Device + Clone, T: Scalar> std::ops::Mul<Tensor<D, T>> for Tensor<D, T> 
 }
 
 impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
-    /// # Element-wise Addition (`try_add`)
+    /// # Element-wise Addition
     /// Performs element-wise addition between two tensors.
     ///
     /// ## Arguments
@@ -120,7 +120,7 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
         Ok(build_api_2(f, output, self, rhs))
     }
 
-    /// # Element-wise Multiplication (`try_mul`)
+    /// # Element-wise Multiplication
     /// Performs element-wise multiplication between two tensors.
     ///
     /// ## Arguments
@@ -143,7 +143,7 @@ impl<D: Device + Clone, T: Scalar> Tensor<D, T> {
 }
 
 impl<D: Device + Clone, T: Float> Tensor<D, T> {
-    /// # Softmax (`softmax`)
+    /// # Softmax
     /// Performs softmax normalization on the input tensor.
     ///
     /// ## Arguments
@@ -159,7 +159,7 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
         build_api_1(f, output, self)
     }
 
-    /// # Layer Normalization (`layer_norm`)
+    /// # Layer Normalization
     /// Performs layer normalization on the input tensor using the given weight and bias tensors.
     ///
     /// ## Arguments
@@ -188,7 +188,7 @@ impl<D: Device + Clone, T: Float> Tensor<D, T> {
         Ok(build_api_3(f, output, self, w, b))
     }
 
-    /// # L2 Normalization (`l2_norm`)
+    /// # L2 Normalization
     /// Performs L2 normalization on the input tensor, normalizing each vector to unit length.
     ///
     /// ## Arguments
@@ -218,14 +218,16 @@ impl<D: Device + Clone> MatrixFp16<D> {
         Ok(Self(tensor))
     }
 
-    /// # Matrix Multiplication (`matmul`)
+    /// # Matrix Multiplication
     /// Performs batched matrix multiplication between this `MatrixFp16` and another tensor.
     ///
     /// ## Arguments
     /// * `self` - A `MatrixFp16` of shape `[K, M]`.
     /// * `rhs` - The right-hand side tensor of shape `[K, N]` (transposed).
     ///
-    /// The inner dimension `K` must match between `self` and `rhs`.
+    /// ### Alignment Requirements
+    /// * `K` must be aligned by 16 elements.
+    /// * The inner dimension `K` must match between `self` and `rhs`.
     ///
     /// ## Returns
     /// * `Result<Tensor<D, T>, TensorError>` - A new tensor of shape `[M, N]` containing the result,
@@ -248,13 +250,13 @@ impl<D: Device + Clone> MatrixFp16<D> {
             Layout::from_shape([m, n]),
         ];
 
-        let phantom = PhantomData::<T>;
-        if n % bn == 0 {
+        if m % bm == 0 && n % bn == 0 {
             let layouts = [
                 layouts[0].div_tiler([(bk, 1), (bm, 1)])?,
                 layouts[1].div_tiler([(bk, 1), (bn, 1)])?,
                 layouts[2].div_tiler([(bm, 1), (bn, 1)])?,
             ];
+            let phantom = PhantomData::<T>;
             let f = |op| MatMatFp16Op {
                 op,
                 phantom,
@@ -264,6 +266,7 @@ impl<D: Device + Clone> MatrixFp16<D> {
             let output = Tensor::zeros(device, [m, n]);
             Ok(build_api_2(f, output, lhs, rhs))
         } else {
+            let phantom = PhantomData::<T>;
             let f = |op| MatVecFp16Op {
                 op,
                 phantom,
