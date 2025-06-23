@@ -242,7 +242,9 @@ impl<D: Device + Clone> MatrixFp16<D> {
         let lhs = self.0.check_layout([k, m])?;
         let rhs = rhs.check_layout([k, n])?;
 
-        let (bk, bm, bn) = (4, 16, 16);
+        const BK: usize = 4;
+        const BM: usize = 16;
+        const BN: usize = 16;
 
         let layouts = [
             Layout::from_shape([k, m]),
@@ -250,11 +252,11 @@ impl<D: Device + Clone> MatrixFp16<D> {
             Layout::from_shape([m, n]),
         ];
 
-        if m % bm == 0 && n % bn == 0 {
+        if m % BM == 0 && n % BN == 0 {
             let layouts = [
-                layouts[0].div_tiler([(bk, 1), (bm, 1)])?,
-                layouts[1].div_tiler([(bk, 1), (bn, 1)])?,
-                layouts[2].div_tiler([(bm, 1), (bn, 1)])?,
+                layouts[0].div_tiler([(BK, 1), (BM, 1)])?,
+                layouts[1].div_tiler([(BK, 1), (BN, 1)])?,
+                layouts[2].div_tiler([(BM, 1), (BN, 1)])?,
             ];
             let phantom = PhantomData::<T>;
             let f = |op| MatMatFp16Op {

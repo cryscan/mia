@@ -198,7 +198,7 @@ impl BackendOp<Backend> for MatVecFp16Op<f16> {
         let output: Vec<_> = handle(move || {
             let a = a.read_layout::<F16x4>(&_a);
             let b = b.read_layout::<F16x4>(&_b);
-            itertools::izip!(0..n, 0..m)
+            itertools::iproduct!(0..n, 0..m)
                 .map(|(y, x)| (0..k).fold(f16::default(), |c, z| c + a[[z, x]].dot(b[[z, y]])))
                 .collect()
         })
@@ -209,7 +209,7 @@ impl BackendOp<Backend> for MatVecFp16Op<f16> {
 
             let a = a.read_layout::<F16x4>(&_a);
             let b = b.read_layout::<F16x4>(&_b);
-            itertools::izip!(0..n, 0..m)
+            itertools::iproduct!(0..n, 0..m)
                 .collect::<Vec<_>>()
                 .into_par_iter()
                 .map(|(y, x)| {
@@ -240,7 +240,7 @@ impl BackendOp<Backend> for MatVecFp16Op<f32> {
         let output: Vec<_> = handle(move || {
             let a = a.read_layout::<F16x4>(&_a);
             let b = b.read_layout::<F32x4>(&_b);
-            itertools::izip!(0..n, 0..m)
+            itertools::iproduct!(0..n, 0..m)
                 .map(|(y, x)| (0..k).fold(0.0, |c, z| c + a[[z, x]].to_f32().dot(b[[z, y]])))
                 .collect()
         })
@@ -251,7 +251,7 @@ impl BackendOp<Backend> for MatVecFp16Op<f32> {
 
             let a = a.read_layout::<F16x4>(&_a);
             let b = b.read_layout::<F32x4>(&_b);
-            itertools::izip!(0..n, 0..m)
+            itertools::iproduct!(0..n, 0..m)
                 .collect::<Vec<_>>()
                 .into_par_iter()
                 .map(|(y, x)| {
@@ -277,7 +277,10 @@ mod tests {
 
     use crate::{
         hal::frontend::MatrixFp16,
-        loom::{device::CpuBuilder, tensor::Tensor},
+        loom::{
+            device::{CpuBuilder, Device},
+            tensor::Tensor,
+        },
     };
 
     macro_rules! assert_approx_eq {
@@ -292,31 +295,28 @@ mod tests {
         };
     }
 
-    #[tokio::test]
-    async fn test_matmul_mat_f16_f16() -> Result<(), Box<dyn Error>> {
-        fastrand::seed(42);
-
-        let cpu = CpuBuilder::new().add_default_ops().build().await;
-        const K: usize = 64;
-        const M: usize = 32;
-        const N: usize = 48;
-
+    async fn test_matmul_f16_f16_inner(
+        device: impl Device + Clone,
+        k: usize,
+        m: usize,
+        n: usize,
+    ) -> Result<(), Box<dyn Error>> {
         // create test data for matrix A (K x M)
-        let a_data: Arc<_> = (0..M)
-            .cartesian_product(0..K)
+        let a_data: Arc<_> = (0..m)
+            .cartesian_product(0..k)
             .map(|(m, k)| fastrand::f32() * 0.1 + m as f32 * 0.01 + k as f32 * 0.001)
             .map(f16::from_f32)
             .collect();
-        let a_tensor = Tensor::create(cpu.clone(), [K, M], a_data.clone())?;
+        let a_tensor = Tensor::create(device.clone(), [k, m], a_data.clone())?;
         let a_matrix = MatrixFp16::from_tensor(a_tensor)?;
 
         // create test data for matrix B (K x N) - note: this is transposed format
-        let b_data: Arc<_> = (0..N)
-            .cartesian_product(0..K)
+        let b_data: Arc<_> = (0..n)
+            .cartesian_product(0..k)
             .map(|(n, k)| fastrand::f32() * 0.1 + n as f32 * 0.002 + k as f32 * 0.003)
             .map(f16::from_f32)
             .collect();
-        let b_tensor = Tensor::create(cpu.clone(), [K, N], b_data.clone())?;
+        let b_tensor = Tensor::create(device.clone(), [k, n], b_data.clone())?;
 
         // perform matrix multiplication
         let result = a_matrix.matmul(b_tensor)?;
@@ -324,15 +324,15 @@ mod tests {
 
         // compute reference result using standard matrix multiplication
         // A is K x M, B is K x N (transposed), result should be M x N
-        let mut r#ref = vec![f16::ZERO; M * N];
-        for (n, m) in itertools::iproduct!(0..N, 0..M) {
+        let mut r#ref = vec![f16::ZERO; m * n];
+        for (n_idx, m_idx) in itertools::iproduct!(0..n, 0..m) {
             let mut sum = 0.0f32;
-            for k in 0..K {
-                let a_val = f16::to_f32(a_data[m * K + k]);
-                let b_val = f16::to_f32(b_data[n * K + k]);
+            for k_idx in 0..k {
+                let a_val = f16::to_f32(a_data[m_idx * k + k_idx]);
+                let b_val = f16::to_f32(b_data[n_idx * k + k_idx]);
                 sum += a_val * b_val;
             }
-            r#ref[n * M + m] = f16::from_f32(sum);
+            r#ref[n_idx * m + m_idx] = f16::from_f32(sum);
         }
 
         for (index, (&computed, &expected)) in output.iter().zip_eq(r#ref.iter()).enumerate() {
@@ -343,29 +343,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_matmul_mat_f16_f32() -> Result<(), Box<dyn Error>> {
+    async fn test_matmul_f16_f16() -> Result<(), Box<dyn Error>> {
         fastrand::seed(42);
-
         let cpu = CpuBuilder::new().add_default_ops().build().await;
-        const K: usize = 64;
-        const M: usize = 32;
-        const N: usize = 48;
 
+        test_matmul_f16_f16_inner(cpu.clone(), 64, 32, 48).await?;
+        test_matmul_f16_f16_inner(cpu.clone(), 32, 16, 24).await?;
+        test_matmul_f16_f16_inner(cpu.clone(), 64, 32, 1).await?;
+
+        Ok(())
+    }
+
+    async fn test_matmul_f16_f32_inner(
+        device: impl Device + Clone,
+        k: usize,
+        m: usize,
+        n: usize,
+    ) -> Result<(), Box<dyn Error>> {
         // create test data for matrix A (K x M) as f16
-        let a_data: Arc<_> = (0..M)
-            .cartesian_product(0..K)
+        let a_data: Arc<_> = (0..m)
+            .cartesian_product(0..k)
             .map(|(m, k)| fastrand::f32() * 0.1 + m as f32 * 0.01 + k as f32 * 0.001)
             .map(f16::from_f32)
             .collect();
-        let a_tensor = Tensor::create(cpu.clone(), [K, M], a_data.clone())?;
+        let a_tensor = Tensor::create(device.clone(), [k, m], a_data.clone())?;
         let a_matrix = MatrixFp16::from_tensor(a_tensor)?;
 
         // create test data for matrix B (K x N) as f32 - note: this is transposed format
-        let b_data: Arc<_> = (0..N)
-            .cartesian_product(0..K)
+        let b_data: Arc<_> = (0..n)
+            .cartesian_product(0..k)
             .map(|(n, k)| fastrand::f32() * 0.1 + n as f32 * 0.002 + k as f32 * 0.003)
             .collect();
-        let b_tensor = Tensor::create(cpu.clone(), [K, N], b_data.clone())?;
+        let b_tensor = Tensor::create(device.clone(), [k, n], b_data.clone())?;
 
         // perform matrix multiplication (f16 x f32 -> f32)
         let result = a_matrix.matmul(b_tensor)?;
@@ -373,20 +382,32 @@ mod tests {
 
         // compute reference result using standard matrix multiplication
         // A is K x M (f16), B is K x N (f32), result should be M x N (f32)
-        let mut r#ref = vec![0.0f32; M * N];
-        for (n, m) in itertools::iproduct!(0..N, 0..M) {
+        let mut r#ref = vec![0.0f32; m * n];
+        for (n_idx, m_idx) in itertools::iproduct!(0..n, 0..m) {
             let mut sum = 0.0f32;
-            for k in 0..K {
-                let a_val = f16::to_f32(a_data[m * K + k]);
-                let b_val = b_data[n * K + k];
+            for k_idx in 0..k {
+                let a_val = f16::to_f32(a_data[m_idx * k + k_idx]);
+                let b_val = b_data[n_idx * k + k_idx];
                 sum += a_val * b_val;
             }
-            r#ref[n * M + m] = sum;
+            r#ref[n_idx * m + m_idx] = sum;
         }
 
         for (index, (&computed, &expected)) in output.iter().zip_eq(r#ref.iter()).enumerate() {
             assert_approx_eq!(index, computed, expected, 1e-4);
         }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_matmul_f16_f32() -> Result<(), Box<dyn Error>> {
+        fastrand::seed(42);
+        let cpu = CpuBuilder::new().add_default_ops().build().await;
+
+        test_matmul_f16_f32_inner(cpu.clone(), 64, 32, 48).await?;
+        test_matmul_f16_f32_inner(cpu.clone(), 32, 16, 24).await?;
+        test_matmul_f16_f32_inner(cpu.clone(), 64, 32, 1).await?;
 
         Ok(())
     }
