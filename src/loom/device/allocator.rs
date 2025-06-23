@@ -198,7 +198,7 @@ impl std::fmt::Display for Allocator {
 }
 
 impl TensorTape {
-    pub fn print_mermaid_alloc<A>(&self, mut allocator: A) -> Mermaid
+    pub fn mermaid_alloc<A>(&self, mut allocator: A) -> Mermaid
     where
         A: std::ops::DerefMut<Target = Allocator>,
     {
