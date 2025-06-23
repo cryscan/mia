@@ -10,30 +10,30 @@ use wide::f32x4;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DataType {
-    F32,
     F16,
+    F32,
     U8,
     U16,
     U32,
     U4x8,
     U8x4,
-    F32x4,
     F16x4,
+    F32x4,
 }
 
 impl DataType {
     /// Number of elements packed.
     pub const fn count(self) -> usize {
         match self {
-            DataType::F32 => 1,
             DataType::F16 => 1,
+            DataType::F32 => 1,
             DataType::U8 => 1,
             DataType::U16 => 1,
             DataType::U32 => 1,
             DataType::U4x8 => 8,
             DataType::U8x4 => 4,
-            DataType::F32x4 => 4,
             DataType::F16x4 => 4,
+            DataType::F32x4 => 4,
         }
     }
 
@@ -47,8 +47,8 @@ impl DataType {
             DataType::U32 => size_of::<u32>(),
             DataType::U4x8 => size_of::<U4x8>(),
             DataType::U8x4 => size_of::<U8x4>(),
-            DataType::F32x4 => size_of::<F32x4>(),
             DataType::F16x4 => size_of::<F16x4>(),
+            DataType::F32x4 => size_of::<F32x4>(),
         }
     }
 }
@@ -103,97 +103,6 @@ impl From<u32> for U8x4 {
 impl From<U8x4> for u32 {
     fn from(value: U8x4) -> Self {
         u32::from_le_bytes(value.0)
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy, Deref, DerefMut, From, Into)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
-#[repr(C)]
-pub struct F32x4(pub [f32; 4]);
-
-impl From<f32x4> for F32x4 {
-    fn from(value: f32x4) -> Self {
-        Self(value.to_array())
-    }
-}
-
-impl From<F32x4> for f32x4 {
-    fn from(value: F32x4) -> Self {
-        f32x4::new(value.0)
-    }
-}
-
-impl F32x4 {
-    #[inline]
-    pub fn dot(self, other: Self) -> f32 {
-        let lhs = f32x4::from(self);
-        let rhs = f32x4::from(other);
-        (lhs * rhs).reduce_add()
-    }
-}
-
-impl std::ops::Add for F32x4 {
-    type Output = Self;
-
-    fn add(self, other: Self) -> Self::Output {
-        let lhs = f32x4::from(self);
-        let rhs = f32x4::from(other);
-        Self::from(lhs + rhs)
-    }
-}
-
-impl std::ops::Sub for F32x4 {
-    type Output = Self;
-
-    fn sub(self, other: Self) -> Self::Output {
-        let lhs = f32x4::from(self);
-        let rhs = f32x4::from(other);
-        Self::from(lhs - rhs)
-    }
-}
-
-impl std::ops::Mul for F32x4 {
-    type Output = Self;
-
-    fn mul(self, other: Self) -> Self::Output {
-        let lhs = f32x4::from(self);
-        let rhs = f32x4::from(other);
-        Self::from(lhs * rhs)
-    }
-}
-
-impl std::ops::Div for F32x4 {
-    type Output = Self;
-
-    fn div(self, other: Self) -> Self::Output {
-        let lhs = f32x4::from(self);
-        let rhs = f32x4::from(other);
-        Self::from(lhs / rhs)
-    }
-}
-
-impl std::ops::AddAssign for F32x4 {
-    fn add_assign(&mut self, other: Self) {
-        *self = *self + other;
-    }
-}
-
-impl std::ops::SubAssign for F32x4 {
-    fn sub_assign(&mut self, other: Self) {
-        *self = *self - other;
-    }
-}
-
-impl std::ops::MulAssign for F32x4 {
-    fn mul_assign(&mut self, other: Self) {
-        *self = *self * other;
-    }
-}
-
-impl std::ops::DivAssign for F32x4 {
-    fn div_assign(&mut self, other: Self) {
-        *self = *self / other;
     }
 }
 
@@ -306,6 +215,97 @@ impl std::ops::DivAssign for F16x4 {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, Deref, DerefMut, From, Into)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[repr(C)]
+pub struct F32x4(pub [f32; 4]);
+
+impl From<f32x4> for F32x4 {
+    fn from(value: f32x4) -> Self {
+        Self(value.to_array())
+    }
+}
+
+impl From<F32x4> for f32x4 {
+    fn from(value: F32x4) -> Self {
+        f32x4::new(value.0)
+    }
+}
+
+impl F32x4 {
+    #[inline]
+    pub fn dot(self, other: Self) -> f32 {
+        let lhs = f32x4::from(self);
+        let rhs = f32x4::from(other);
+        (lhs * rhs).reduce_add()
+    }
+}
+
+impl std::ops::Add for F32x4 {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        let lhs = f32x4::from(self);
+        let rhs = f32x4::from(other);
+        Self::from(lhs + rhs)
+    }
+}
+
+impl std::ops::Sub for F32x4 {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self::Output {
+        let lhs = f32x4::from(self);
+        let rhs = f32x4::from(other);
+        Self::from(lhs - rhs)
+    }
+}
+
+impl std::ops::Mul for F32x4 {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self::Output {
+        let lhs = f32x4::from(self);
+        let rhs = f32x4::from(other);
+        Self::from(lhs * rhs)
+    }
+}
+
+impl std::ops::Div for F32x4 {
+    type Output = Self;
+
+    fn div(self, other: Self) -> Self::Output {
+        let lhs = f32x4::from(self);
+        let rhs = f32x4::from(other);
+        Self::from(lhs / rhs)
+    }
+}
+
+impl std::ops::AddAssign for F32x4 {
+    fn add_assign(&mut self, other: Self) {
+        *self = *self + other;
+    }
+}
+
+impl std::ops::SubAssign for F32x4 {
+    fn sub_assign(&mut self, other: Self) {
+        *self = *self - other;
+    }
+}
+
+impl std::ops::MulAssign for F32x4 {
+    fn mul_assign(&mut self, other: Self) {
+        *self = *self * other;
+    }
+}
+
+impl std::ops::DivAssign for F32x4 {
+    fn div_assign(&mut self, other: Self) {
+        *self = *self / other;
+    }
+}
+
 impl_bytemuck!(U4x8);
 impl_bytemuck!(U8x4);
 impl_bytemuck!(F32x4);
@@ -320,15 +320,15 @@ pub trait Zero {
     fn zero() -> Self;
 }
 
-impl Zero for f32 {
-    fn zero() -> Self {
-        0.0
-    }
-}
-
 impl Zero for f16 {
     fn zero() -> Self {
         Self::ZERO
+    }
+}
+
+impl Zero for f32 {
+    fn zero() -> Self {
+        0.0
     }
 }
 
@@ -378,15 +378,15 @@ pub trait One {
     fn one() -> Self;
 }
 
-impl One for f32 {
-    fn one() -> Self {
-        1.0
-    }
-}
-
 impl One for f16 {
     fn one() -> Self {
         Self::ONE
+    }
+}
+
+impl One for f32 {
+    fn one() -> Self {
+        1.0
     }
 }
 
@@ -442,12 +442,12 @@ pub trait Scalar: Sized + Zeroable + Pod + Zero + One + Send + Sync {
     }
 }
 
-impl Scalar for f32 {
-    const DATA_TYPE: DataType = DataType::F32;
-}
-
 impl Scalar for f16 {
     const DATA_TYPE: DataType = DataType::F16;
+}
+
+impl Scalar for f32 {
+    const DATA_TYPE: DataType = DataType::F32;
 }
 
 impl Scalar for u8 {
@@ -518,6 +518,105 @@ impl Float4 for F32x4 {
 }
 impl Float4 for F16x4 {
     type Float = f16;
+}
+
+pub trait AsStd140 {
+    const ALIGN: usize;
+
+    /// Returns the data as a standard 140 layout.
+    fn as_std_140(&self) -> Vec<u8>;
+}
+
+impl AsStd140 for f16 {
+    const ALIGN: usize = 4;
+
+    #[inline]
+    fn as_std_140(&self) -> Vec<u8> {
+        [self.to_ne_bytes(), f16::ZERO.to_ne_bytes()]
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+}
+
+impl AsStd140 for f32 {
+    const ALIGN: usize = 4;
+
+    #[inline]
+    fn as_std_140(&self) -> Vec<u8> {
+        self.to_ne_bytes().to_vec()
+    }
+}
+
+impl AsStd140 for u8 {
+    const ALIGN: usize = 4;
+
+    #[inline]
+    fn as_std_140(&self) -> Vec<u8> {
+        vec![*self, 0, 0, 0]
+    }
+}
+
+impl AsStd140 for u16 {
+    const ALIGN: usize = 4;
+
+    #[inline]
+    fn as_std_140(&self) -> Vec<u8> {
+        let data = [*self, 0];
+        bytemuck::cast_slice(&data).to_vec()
+    }
+}
+
+impl AsStd140 for u32 {
+    const ALIGN: usize = 4;
+
+    #[inline]
+    fn as_std_140(&self) -> Vec<u8> {
+        self.to_ne_bytes().to_vec()
+    }
+}
+
+impl AsStd140 for U4x8 {
+    const ALIGN: usize = 4;
+
+    #[inline]
+    fn as_std_140(&self) -> Vec<u8> {
+        self.0.0.to_vec()
+    }
+}
+
+impl AsStd140 for U8x4 {
+    const ALIGN: usize = 4;
+
+    #[inline]
+    fn as_std_140(&self) -> Vec<u8> {
+        self.0.to_vec()
+    }
+}
+
+impl AsStd140 for F16x4 {
+    const ALIGN: usize = 8;
+
+    #[inline]
+    fn as_std_140(&self) -> Vec<u8> {
+        self.0.into_iter().flat_map(f16::to_ne_bytes).collect()
+    }
+}
+
+impl AsStd140 for F32x4 {
+    const ALIGN: usize = 16;
+
+    #[inline]
+    fn as_std_140(&self) -> Vec<u8> {
+        self.0.into_iter().flat_map(f32::to_ne_bytes).collect()
+    }
+}
+
+pub trait AsStd430 {
+    const ALIGN: usize;
+
+    /// Returns the data as a standard 430 layout.
+    fn as_std_430(&self) -> Vec<u8>;
 }
 
 #[cfg(test)]
