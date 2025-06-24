@@ -1,5 +1,7 @@
 use crate::loom::{layout::Layout, num::DataType};
 
+pub mod shader;
+
 /// A GPU kernel launch.
 #[derive(Debug, Clone)]
 pub struct Launch {
