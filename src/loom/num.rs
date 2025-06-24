@@ -562,8 +562,10 @@ impl AsStd140 for u16 {
 
     #[inline]
     fn as_std_140(&self) -> Vec<u8> {
-        let data = [*self, 0];
-        bytemuck::cast_slice(&data).to_vec()
+        [self.to_ne_bytes(), 0u16.to_ne_bytes()]
+            .into_iter()
+            .flatten()
+            .collect()
     }
 }
 
@@ -619,13 +621,108 @@ pub trait AsStd430 {
     fn as_std_430(&self) -> Vec<u8>;
 }
 
+impl AsStd430 for f16 {
+    const ALIGN: usize = 4;
+
+    #[inline]
+    fn as_std_430(&self) -> Vec<u8> {
+        self.as_std_140()
+    }
+}
+
+impl AsStd430 for f32 {
+    const ALIGN: usize = 4;
+
+    #[inline]
+    fn as_std_430(&self) -> Vec<u8> {
+        self.as_std_140()
+    }
+}
+
+impl AsStd430 for u8 {
+    const ALIGN: usize = 4;
+
+    #[inline]
+    fn as_std_430(&self) -> Vec<u8> {
+        self.as_std_140()
+    }
+}
+
+impl AsStd430 for u16 {
+    const ALIGN: usize = 4;
+
+    #[inline]
+    fn as_std_430(&self) -> Vec<u8> {
+        self.as_std_140()
+    }
+}
+
+impl AsStd430 for u32 {
+    const ALIGN: usize = 4;
+
+    #[inline]
+    fn as_std_430(&self) -> Vec<u8> {
+        self.as_std_140()
+    }
+}
+
+impl AsStd430 for U4x8 {
+    const ALIGN: usize = 4;
+
+    #[inline]
+    fn as_std_430(&self) -> Vec<u8> {
+        self.as_std_140()
+    }
+}
+
+impl AsStd430 for U8x4 {
+    const ALIGN: usize = 4;
+
+    #[inline]
+    fn as_std_430(&self) -> Vec<u8> {
+        self.as_std_140()
+    }
+}
+
+impl AsStd430 for F16x4 {
+    const ALIGN: usize = 8;
+
+    #[inline]
+    fn as_std_430(&self) -> Vec<u8> {
+        self.as_std_140()
+    }
+}
+
+impl AsStd430 for F32x4 {
+    const ALIGN: usize = 16;
+
+    #[inline]
+    fn as_std_430(&self) -> Vec<u8> {
+        self.as_std_140()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::loom::num::{U4x8, U8x4};
 
     #[test]
-    pub fn test_packed_types() {
+    fn test_packed_types() {
         println!("{}", U4x8::from(0xfeed2025));
         println!("{}", U8x4::from(0xfeed2025));
+    }
+    #[test]
+    fn test_std_140_align() {
+        use super::*;
+
+        assert_eq!(f16::zero().as_std_140().len(), <f16 as AsStd140>::ALIGN);
+        assert_eq!(f32::zero().as_std_140().len(), <f32 as AsStd140>::ALIGN);
+        assert_eq!(u8::zero().as_std_140().len(), <u8 as AsStd140>::ALIGN);
+        assert_eq!(u16::zero().as_std_140().len(), <u16 as AsStd140>::ALIGN);
+        assert_eq!(u32::zero().as_std_140().len(), <u32 as AsStd140>::ALIGN);
+        assert_eq!(U4x8::zero().as_std_140().len(), <U4x8 as AsStd140>::ALIGN);
+        assert_eq!(U8x4::zero().as_std_140().len(), <U8x4 as AsStd140>::ALIGN);
+        assert_eq!(F16x4::zero().as_std_140().len(), <F16x4 as AsStd140>::ALIGN);
+        assert_eq!(F32x4::zero().as_std_140().len(), <F32x4 as AsStd140>::ALIGN);
     }
 }
