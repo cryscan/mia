@@ -47,7 +47,11 @@
 //!     .add_storage_buffer(0, 1, "output", "array<f32>", AccessMode::Write)
 //!     .add_function("main", |f| {
 //!         f.launch_size(64, 1, 1)
-//!             .add_parameter("id", "@builtin(global_invocation_id) vec3<u32>")
+//!             .add_parameter_with_attributes(
+//!                 "id",
+//!                 "vec3<u32>",
+//!                 ["@builtin(global_invocation_id)"],
+//!             )
 //!             .add_line("let index = id.x;")
 //!             .add_line("output[index] = input[index] * 2.0;")
 //!     })
@@ -89,15 +93,6 @@ pub struct ShaderBuilder {
 }
 
 #[derive(Debug, Clone)]
-pub struct Binding {
-    pub group: u32,
-    pub binding: u32,
-    pub name: String,
-    pub binding_type: BindingType,
-    pub access: AccessMode,
-}
-
-#[derive(Debug, Clone)]
 pub enum BindingType {
     Storage(String), // type name
     Uniform(String), // type name
@@ -112,6 +107,65 @@ pub enum AccessMode {
     ReadWrite,
 }
 
+impl std::fmt::Display for AccessMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Read => write!(f, "read"),
+            Self::Write => write!(f, "write"),
+            Self::ReadWrite => write!(f, "read_write"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum AddressSpace {
+    Private,
+    Workgroup,
+}
+
+impl std::fmt::Display for AddressSpace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Private => write!(f, "private"),
+            Self::Workgroup => write!(f, "workgroup"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Binding {
+    pub group: u32,
+    pub binding: u32,
+    pub name: String,
+    pub binding_type: BindingType,
+    pub access: AccessMode,
+}
+
+impl std::fmt::Display for Binding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let binding_str = match &self.binding_type {
+            BindingType::Storage(type_name) => {
+                format!("var<storage, {}> {}: {}", self.access, self.name, type_name)
+            }
+            BindingType::Uniform(type_name) => {
+                format!("var<uniform> {}: {}", self.name, type_name)
+            }
+            BindingType::Texture2d => {
+                format!("var {}: texture_2d<f32>", self.name)
+            }
+            BindingType::Sampler => {
+                format!("var {}: sampler", self.name)
+            }
+        };
+
+        write!(
+            f,
+            "@group({}) @binding({}) {};",
+            self.group, self.binding, binding_str
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LaunchSize {
     pub x: u32,
@@ -123,35 +177,96 @@ pub struct LaunchSize {
 pub struct Variable {
     pub name: String,
     pub r#type: String,
+    pub address_space: AddressSpace,
     pub initial_value: Option<String>,
+}
+
+impl std::fmt::Display for Variable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.initial_value {
+            Some(value) => write!(
+                f,
+                "var<{}> {}: {} = {};",
+                self.address_space, self.name, self.r#type, value
+            ),
+            None => write!(
+                f,
+                "var<{}> {}: {};",
+                self.address_space, self.name, self.r#type
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct Function {
     pub name: String,
     pub launch_size: Option<LaunchSize>,
-    pub parameters: Vec<Parameter>,
+    pub parameters: Vec<Field>,
     pub return_type: Option<String>,
     pub body: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
-pub struct Parameter {
-    pub name: String,
-    pub param_type: String,
+impl std::fmt::Display for Function {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(LaunchSize { x, y, z }) = &self.launch_size {
+            writeln!(f, "@compute @workgroup_size({}, {}, {})", x, y, z)?;
+        }
+
+        write!(f, "fn {}(", self.name)?;
+
+        let params = self
+            .parameters
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        write!(f, "{}", params)?;
+
+        match &self.return_type {
+            Some(ret) => writeln!(f, ") -> {} {{", ret)?,
+            None => writeln!(f, ") {{")?,
+        }
+
+        for line in &self.body {
+            writeln!(f, "    {}", line)?;
+        }
+
+        writeln!(f, "}}")
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct Struct {
     pub name: String,
-    pub fields: Vec<StructField>,
+    pub fields: Vec<Field>,
+}
+
+impl std::fmt::Display for Struct {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "struct {} {{", self.name)?;
+        for field in &self.fields {
+            writeln!(f, "    {},", field)?;
+        }
+        writeln!(f, "}}")
+    }
 }
 
 #[derive(Debug, Clone)]
-pub struct StructField {
+pub struct Field {
     pub name: String,
-    pub field_type: String,
+    pub r#type: String,
     pub attributes: Vec<String>,
+}
+
+impl std::fmt::Display for Field {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let attrs = match self.attributes.is_empty() {
+            true => String::new(),
+            false => format!("{} ", self.attributes.join(" ")),
+        };
+        write!(f, "{}{}: {}", attrs, self.name, self.r#type)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -159,6 +274,12 @@ pub struct Constant {
     pub name: String,
     pub r#type: String,
     pub value: String,
+}
+
+impl std::fmt::Display for Constant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "const {}: {} = {};", self.name, self.r#type, self.value)
+    }
 }
 
 impl ShaderBuilder {
@@ -236,10 +357,16 @@ impl ShaderBuilder {
     }
 
     /// Add a variable in workgroup address space.
-    pub fn add_variable(mut self, name: impl Into<String>, r#type: impl Into<String>) -> Self {
+    pub fn add_variable(
+        mut self,
+        name: impl Into<String>,
+        r#type: impl Into<String>,
+        address_space: AddressSpace,
+    ) -> Self {
         self.variables.push(Variable {
             name: name.into(),
             r#type: r#type.into(),
+            address_space,
             initial_value: None,
         });
         self
@@ -250,11 +377,13 @@ impl ShaderBuilder {
         mut self,
         name: impl Into<String>,
         r#type: impl Into<String>,
+        address_space: AddressSpace,
         initial_value: impl Into<String>,
     ) -> Self {
         self.variables.push(Variable {
             name: name.into(),
             r#type: r#type.into(),
+            address_space,
             initial_value: Some(initial_value.into()),
         });
         self
@@ -275,11 +404,7 @@ impl ShaderBuilder {
 
         // add constants
         for constant in &self.constants {
-            writeln!(
-                shader,
-                "const {}: {} = {};",
-                constant.name, constant.r#type, constant.value
-            )?;
+            writeln!(shader, "{}", constant)?;
         }
         if !self.constants.is_empty() {
             writeln!(shader)?;
@@ -287,46 +412,12 @@ impl ShaderBuilder {
 
         // add struct definitions
         for struct_def in &self.structs {
-            writeln!(shader, "struct {} {{", struct_def.name)?;
-            for field in &struct_def.fields {
-                let attrs = match field.attributes.is_empty() {
-                    true => String::new(),
-                    false => format!("{} ", field.attributes.join(" ")),
-                };
-                writeln!(shader, "    {}{}: {},", attrs, field.name, field.field_type)?;
-            }
-            writeln!(shader, "}}")?;
-            writeln!(shader)?;
+            writeln!(shader, "{}", struct_def)?;
         }
 
         // add bindings
         for binding in &self.bindings {
-            let access_str = match binding.access {
-                AccessMode::Read => "read",
-                AccessMode::Write => "write",
-                AccessMode::ReadWrite => "read_write",
-            };
-
-            let binding_str = match &binding.binding_type {
-                BindingType::Storage(r#type) => {
-                    format!("var<storage, {}> {}: {};", access_str, binding.name, r#type)
-                }
-                BindingType::Uniform(r#type) => {
-                    format!("var<uniform> {}: {};", binding.name, r#type)
-                }
-                BindingType::Texture2d => {
-                    format!("var {}: texture_2d<f32>;", binding.name)
-                }
-                BindingType::Sampler => {
-                    format!("var {}: sampler;", binding.name)
-                }
-            };
-
-            writeln!(
-                shader,
-                "@group({}) @binding({}) {}",
-                binding.group, binding.binding, binding_str
-            )?;
+            writeln!(shader, "{}", binding)?;
         }
         if !self.bindings.is_empty() {
             writeln!(shader)?;
@@ -334,62 +425,15 @@ impl ShaderBuilder {
 
         // add variables
         for variable in &self.variables {
-            match &variable.initial_value {
-                Some(initial_value) => {
-                    writeln!(
-                        shader,
-                        "var<workgroup> {}: {} = {};",
-                        variable.name, variable.r#type, initial_value
-                    )?;
-                }
-                None => {
-                    writeln!(
-                        shader,
-                        "var<workgroup> {}: {};",
-                        variable.name, variable.r#type
-                    )?;
-                }
-            }
+            writeln!(shader, "{}", variable)?;
         }
         if !self.variables.is_empty() {
             writeln!(shader)?;
         }
 
-        // Add functions
+        // add functions
         for function in &self.functions {
-            let launch = match &function.launch_size {
-                Some(LaunchSize { x, y, z }) => {
-                    format!("@compute @workgroup_size({}, {}, {})", x, y, z)
-                }
-                None => String::new(),
-            };
-
-            let params = function
-                .parameters
-                .iter()
-                .map(|p| format!("{}: {}", p.name, p.param_type))
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            match &function.return_type {
-                Some(return_type) => writeln!(
-                    shader,
-                    "{}\nfn {}({}) -> {} {{",
-                    launch, function.name, params, return_type
-                )?,
-                None => writeln!(shader, "{}\nfn {}({}) {{", launch, function.name, params)?,
-            }
-
-            // Add function body with proper indentation
-            for line in &function.body {
-                if !line.trim().is_empty() {
-                    writeln!(shader, "    {}", line)?;
-                } else {
-                    writeln!(shader)?;
-                }
-            }
-            writeln!(shader, "}}")?;
-            writeln!(shader)?;
+            writeln!(shader, "{}", function)?;
         }
 
         Ok(shader)
@@ -400,7 +444,7 @@ impl ShaderBuilder {
 #[derive(Debug, Clone)]
 pub struct StructBuilder {
     name: String,
-    fields: Vec<StructField>,
+    fields: Vec<Field>,
 }
 
 impl StructBuilder {
@@ -412,9 +456,9 @@ impl StructBuilder {
 
     /// Add a field to the struct.
     pub fn add_field(mut self, name: impl Into<String>, field_type: impl Into<String>) -> Self {
-        self.fields.push(StructField {
+        self.fields.push(Field {
             name: name.into(),
-            field_type: field_type.into(),
+            r#type: field_type.into(),
             attributes: Vec::new(),
         });
         self
@@ -425,12 +469,12 @@ impl StructBuilder {
         mut self,
         name: impl Into<String>,
         field_type: impl Into<String>,
-        attributes: Vec<String>,
+        attributes: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
-        self.fields.push(StructField {
+        self.fields.push(Field {
             name: name.into(),
-            field_type: field_type.into(),
-            attributes,
+            r#type: field_type.into(),
+            attributes: attributes.into_iter().map(Into::into).collect(),
         });
         self
     }
@@ -547,7 +591,7 @@ impl BlockBuilder {
 pub struct FunctionBuilder {
     name: String,
     launch_size: Option<LaunchSize>,
-    parameters: Vec<Parameter>,
+    parameters: Vec<Field>,
     return_type: Option<String>,
     body: BlockBuilder,
 }
@@ -576,10 +620,26 @@ impl FunctionBuilder {
     }
 
     /// Add a parameter to the function.
-    pub fn add_parameter(mut self, name: impl Into<String>, param_type: impl Into<String>) -> Self {
-        self.parameters.push(Parameter {
+    pub fn add_parameter(mut self, name: impl Into<String>, r#type: impl Into<String>) -> Self {
+        self.parameters.push(Field {
             name: name.into(),
-            param_type: param_type.into(),
+            r#type: r#type.into(),
+            attributes: Vec::new(),
+        });
+        self
+    }
+
+    /// Add a parameter with attributes.
+    pub fn add_parameter_with_attributes(
+        mut self,
+        name: impl Into<String>,
+        r#type: impl Into<String>,
+        attributes: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.parameters.push(Field {
+            name: name.into(),
+            r#type: r#type.into(),
+            attributes: attributes.into_iter().map(Into::into).collect(),
         });
         self
     }
@@ -656,7 +716,11 @@ mod tests {
             .add_storage_buffer(0, 1, "output", "array<f32>", AccessMode::Write)
             .add_function("main", |f| {
                 f.launch_size(64, 1, 1)
-                    .add_parameter("index", "@builtin(global_invocation_id) vec3<u32>")
+                    .add_parameter_with_attributes(
+                        "index",
+                        "vec3<u32>",
+                        vec!["@builtin(global_invocation_id)"],
+                    )
                     .add_line("let i = index.x;")
                     .add_line("output[i] = input[i] * 2.0;")
             })
@@ -667,7 +731,7 @@ mod tests {
 @group(0) @binding(1) var<storage, write> output: array<f32>;
 
 @compute @workgroup_size(64, 1, 1)
-fn main(index: @builtin(global_invocation_id) vec3<u32>) {
+fn main(@builtin(global_invocation_id) index: vec3<u32>) {
     let i = index.x;
     output[i] = input[i] * 2.0;
 }
@@ -687,7 +751,11 @@ fn main(index: @builtin(global_invocation_id) vec3<u32>) {
             .add_storage_buffer(0, 1, "data", "array<f32>", AccessMode::ReadWrite)
             .add_function("compute", |f| {
                 f.launch_size(256, 1, 1)
-                    .add_parameter("id", "@builtin(global_invocation_id) vec3<u32>")
+                    .add_parameter_with_attributes(
+                        "id",
+                        "vec3<u32>",
+                        ["@builtin(global_invocation_id)"],
+                    )
                     .add_line("let index = id.x;")
                     .add_if("index < arrayLength(&data)", |b| {
                         b.add_line("data[index] = data[index] * params.scale + params.offset;")
@@ -705,7 +773,7 @@ fn main(index: @builtin(global_invocation_id) vec3<u32>) {
 @group(0) @binding(1) var<storage, read_write> data: array<f32>;
 
 @compute @workgroup_size(256, 1, 1)
-fn compute(id: @builtin(global_invocation_id) vec3<u32>) {
+fn compute(@builtin(global_invocation_id) id: vec3<u32>) {
     let index = id.x;
     if (index < arrayLength(&data)) {
         data[index] = data[index] * params.scale + params.offset;
@@ -722,13 +790,21 @@ fn compute(id: @builtin(global_invocation_id) vec3<u32>) {
         let shader = ShaderBuilder::new()
             .add_constant("WORKGROUP_SIZE", "u32", "64u")
             .add_constant("PI", "f32", "3.14159265359")
-            .add_variable("shared_data", "array<f32, 64>")
+            .add_variable("shared_data", "array<f32, 64>", AddressSpace::Workgroup)
             .add_storage_buffer(0, 0, "input", "array<f32>", AccessMode::Read)
             .add_storage_buffer(0, 1, "output", "array<f32>", AccessMode::Write)
             .add_function("main", |f| {
                 f.launch_size(64, 1, 1)
-                    .add_parameter("local_id", "@builtin(local_invocation_id) vec3<u32>")
-                    .add_parameter("global_id", "@builtin(global_invocation_id) vec3<u32>")
+                    .add_parameter_with_attributes(
+                        "local_id",
+                        "vec3<u32>",
+                        ["@builtin(local_invocation_id)"],
+                    )
+                    .add_parameter_with_attributes(
+                        "global_id",
+                        "vec3<u32>",
+                        ["@builtin(global_invocation_id)"],
+                    )
                     .add_line("let lid = local_id.x;")
                     .add_line("let gid = global_id.x;")
                     .add_line("shared_data[lid] = input[gid];")
@@ -747,7 +823,7 @@ const PI: f32 = 3.14159265359;
 var<workgroup> shared_data: array<f32, 64>;
 
 @compute @workgroup_size(64, 1, 1)
-fn main(local_id: @builtin(local_invocation_id) vec3<u32>, global_id: @builtin(global_invocation_id) vec3<u32>) {
+fn main(@builtin(local_invocation_id) local_id: vec3<u32>, @builtin(global_invocation_id) global_id: vec3<u32>) {
     let lid = local_id.x;
     let gid = global_id.x;
     shared_data[lid] = input[gid];
@@ -769,7 +845,11 @@ fn main(local_id: @builtin(local_invocation_id) vec3<u32>, global_id: @builtin(g
             .add_uniform_buffer(0, 3, "size", "u32")
             .add_function("matrix_multiply", |f| {
                 f.launch_size(16, 16, 1)
-                    .add_parameter("id", "@builtin(global_invocation_id) vec3<u32>")
+                    .add_parameter_with_attributes(
+                        "id",
+                        "vec3<u32>",
+                        ["@builtin(global_invocation_id)"],
+                    )
                     .add_line("let row = id.y;")
                     .add_line("let col = id.x;")
                     .add_line("var sum = 0.0;")
@@ -790,7 +870,7 @@ fn main(local_id: @builtin(local_invocation_id) vec3<u32>, global_id: @builtin(g
 @group(0) @binding(3) var<uniform> size: u32;
 
 @compute @workgroup_size(16, 16, 1)
-fn matrix_multiply(id: @builtin(global_invocation_id) vec3<u32>) {
+fn matrix_multiply(@builtin(global_invocation_id) id: vec3<u32>) {
     let row = id.y;
     let col = id.x;
     var sum = 0.0;
@@ -812,23 +892,19 @@ fn matrix_multiply(id: @builtin(global_invocation_id) vec3<u32>) {
     fn test_shader_with_struct_attributes() {
         let shader = ShaderBuilder::new()
             .add_struct("Vertex", |s| {
-                s.add_field_with_attributes(
-                    "position",
-                    "vec3<f32>",
-                    vec!["@location(0)".to_string()],
-                )
-                .add_field_with_attributes("normal", "vec3<f32>", vec!["@location(1)".to_string()])
-                .add_field_with_attributes(
-                    "uv",
-                    "vec2<f32>",
-                    vec!["@location(2)".to_string()],
-                )
+                s.add_field_with_attributes("position", "vec3<f32>", ["@location(0)".to_string()])
+                    .add_field_with_attributes("normal", "vec3<f32>", ["@location(1)".to_string()])
+                    .add_field_with_attributes("uv", "vec2<f32>", ["@location(2)".to_string()])
             })
             .add_storage_buffer(0, 0, "vertices", "array<Vertex>", AccessMode::Read)
             .add_storage_buffer(0, 1, "output", "array<vec3<f32>>", AccessMode::Write)
             .add_function("process_vertices", |f| {
                 f.launch_size(64, 1, 1)
-                    .add_parameter("index", "@builtin(global_invocation_id) vec3<u32>")
+                    .add_parameter_with_attributes(
+                        "index",
+                        "vec3<u32>",
+                        ["@builtin(global_invocation_id)"],
+                    )
                     .add_line("let i = index.x;")
                     .add_if("i < arrayLength(&vertices)", |b| {
                         b.add_line("let vertex = vertices[i];")
@@ -848,7 +924,7 @@ fn matrix_multiply(id: @builtin(global_invocation_id) vec3<u32>) {
 @group(0) @binding(1) var<storage, write> output: array<vec3<f32>>;
 
 @compute @workgroup_size(64, 1, 1)
-fn process_vertices(index: @builtin(global_invocation_id) vec3<u32>) {
+fn process_vertices(@builtin(global_invocation_id) index: vec3<u32>) {
     let i = index.x;
     if (i < arrayLength(&vertices)) {
         let vertex = vertices[i];
@@ -878,7 +954,11 @@ fn process_vertices(index: @builtin(global_invocation_id) vec3<u32>) {
             })
             .add_function("main", |f| {
                 f.launch_size(64, 1, 1)
-                    .add_parameter("id", "@builtin(global_invocation_id) vec3<u32>")
+                    .add_parameter_with_attributes(
+                        "id",
+                        "vec3<u32>",
+                        ["@builtin(global_invocation_id)"],
+                    )
                     .add_line("let index = id.x;")
                     .add_line("data[index] = helper(data[index]);")
             })
@@ -887,13 +967,12 @@ fn process_vertices(index: @builtin(global_invocation_id) vec3<u32>) {
 
         let expected = r#"@group(0) @binding(0) var<storage, read_write> data: array<f32>;
 
-
 fn helper(value: f32) -> f32 {
     return value * 2.0;
 }
 
 @compute @workgroup_size(64, 1, 1)
-fn main(id: @builtin(global_invocation_id) vec3<u32>) {
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let index = id.x;
     data[index] = helper(data[index]);
 }
@@ -910,7 +989,11 @@ fn main(id: @builtin(global_invocation_id) vec3<u32>) {
             .add_storage_buffer(0, 1, "output", "array<f32>", AccessMode::Write)
             .add_function("vector_dot_product", |f| {
                 f.launch_size(64, 1, 1)
-                    .add_parameter("id", "@builtin(global_invocation_id) vec3<u32>")
+                    .add_parameter_with_attributes(
+                        "id",
+                        "vec3<u32>",
+                        ["@builtin(global_invocation_id)"],
+                    )
                     .add_line("let base_idx = id.x * 4u;")
                     .add_line("var sum = 0.0;")
                     .add_unrolled_loop("i", 0..4, |_var, iteration, b| {
@@ -928,7 +1011,7 @@ fn main(id: @builtin(global_invocation_id) vec3<u32>) {
 @group(0) @binding(1) var<storage, write> output: array<f32>;
 
 @compute @workgroup_size(64, 1, 1)
-fn vector_dot_product(id: @builtin(global_invocation_id) vec3<u32>) {
+fn vector_dot_product(@builtin(global_invocation_id) id: vec3<u32>) {
     let base_idx = id.x * 4u;
     var sum = 0.0;
     sum += input[base_idx + 0u] * input[base_idx + 0u];
@@ -952,7 +1035,11 @@ fn vector_dot_product(id: @builtin(global_invocation_id) vec3<u32>) {
             .add_uniform_buffer(0, 3, "size", "u32")
             .add_function("unrolled_matrix_multiply", |f| {
                 f.launch_size(16, 16, 1)
-                    .add_parameter("id", "@builtin(global_invocation_id) vec3<u32>")
+                    .add_parameter_with_attributes(
+                        "id",
+                        "vec3<u32>",
+                        ["@builtin(global_invocation_id)"],
+                    )
                     .add_line("let row = id.y;")
                     .add_line("let col = id.x;")
                     .add_line("var sum = 0.0;")
@@ -976,7 +1063,7 @@ fn vector_dot_product(id: @builtin(global_invocation_id) vec3<u32>) {
 @group(0) @binding(3) var<uniform> size: u32;
 
 @compute @workgroup_size(16, 16, 1)
-fn unrolled_matrix_multiply(id: @builtin(global_invocation_id) vec3<u32>) {
+fn unrolled_matrix_multiply(@builtin(global_invocation_id) id: vec3<u32>) {
     let row = id.y;
     let col = id.x;
     var sum = 0.0;
