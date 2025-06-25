@@ -1,3 +1,81 @@
+//! # GPU Shader Builder Module
+//!
+//! This module provides a comprehensive builder pattern for constructing WGSL (WebGPU Shading Language)
+//! compute shaders programmatically. It offers a type-safe, fluent API for building complex GPU
+//! compute shaders without writing raw WGSL code.
+//!
+//! ## Overview
+//!
+//! The shader builder system consists of several key components:
+//!
+//! - **`ShaderBuilder`**: The main entry point for constructing complete shaders
+//! - **`FunctionBuilder`**: For building individual compute functions with parameters and bodies
+//! - **`BlockBuilder`**: For constructing code blocks with proper indentation and control flow
+//!
+//! ## Key Features
+//!
+//! ### Resource Bindings
+//! - Storage buffers with read/write/read-write access modes
+//! - Uniform buffers for constant data
+//! - Texture and sampler bindings
+//! - Automatic binding group and binding index management
+//!
+//! ### Data Structures
+//! - Custom struct definitions with field attributes
+//! - Built-in WGSL types (f32, u32, vec3, mat4, etc.)
+//! - Array types with proper sizing
+//!
+//! ### Control Flow
+//! - Conditional statements (if/else)
+//! - For loops with automatic variable management
+//! - Loop unrolling for performance optimization
+//! - Nested code blocks with proper indentation
+//!
+//! ### Advanced Features
+//! - Workgroup-shared variables
+//! - Constants and compile-time values
+//! - Multiple function definitions
+//! - Automatic workgroup size configuration
+//!
+//! ## Usage Example
+//!
+//! ```rust
+//! use mia::hal::gpu::shader::{ShaderBuilder, AccessMode};
+//!
+//! let shader = ShaderBuilder::new()
+//!     .add_storage_buffer(0, 0, "input", "array<f32>", AccessMode::Read)
+//!     .add_storage_buffer(0, 1, "output", "array<f32>", AccessMode::Write)
+//!     .add_function("main", |f| {
+//!         f.launch_size(64, 1, 1)
+//!             .add_parameter("id", "@builtin(global_invocation_id) vec3<u32>")
+//!             .add_line("let index = id.x;")
+//!             .add_line("output[index] = input[index] * 2.0;")
+//!     })
+//!     .build()
+//!     .unwrap();
+//! ```
+//!
+//! ## Performance Considerations
+//!
+//! - **Loop Unrolling**: Use `add_unrolled_loop` for small, fixed iteration counts to reduce
+//!   loop overhead and enable better GPU optimization
+//! - **Workgroup Size**: Choose workgroup sizes that are multiples of the GPU's warp/wavefront
+//!   size (typically 32 or 64)
+//! - **Memory Access**: Prefer coalesced memory access patterns for better performance
+//!
+//! ## Error Handling
+//!
+//! The builder validates shader construction and returns descriptive errors for:
+//! - Missing required functions
+//! - Invalid binding configurations
+//! - Malformed WGSL syntax
+//! - Incompatible resource types
+//!
+//! ## Thread Safety
+//!
+//! All builder types are `Send + Sync` and can be safely used across threads. The generated
+//! WGSL code is deterministic and reproducible.
+
 use std::fmt::Write;
 
 /// A builder for constructing WGSL compute shaders piece by piece.
@@ -37,8 +115,8 @@ pub enum AccessMode {
 #[derive(Debug, Clone)]
 pub struct LaunchSize {
     pub x: u32,
-    pub y: Option<u32>,
-    pub z: Option<u32>,
+    pub y: u32,
+    pub z: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -280,10 +358,7 @@ impl ShaderBuilder {
         // Add functions
         for function in &self.functions {
             let launch = match &function.launch_size {
-                Some(launch_size) => {
-                    let x = launch_size.x;
-                    let y = launch_size.y.unwrap_or(1);
-                    let z = launch_size.z.unwrap_or(1);
+                Some(LaunchSize { x, y, z }) => {
                     format!("@compute @workgroup_size({}, {}, {})", x, y, z)
                 }
                 None => String::new(),
@@ -424,16 +499,18 @@ impl BlockBuilder {
         var: impl Into<String>,
         start: impl Into<String>,
         end: impl Into<String>,
+        step: impl Into<String>,
         body_fn: impl FnOnce(BlockBuilder) -> BlockBuilder,
     ) -> Self {
         let var = var.into();
         let header = format!(
-            "for (var {}: u32 = {}u; {} < {}; {}++)",
+            "for (var {}: u32 = {}; {} < {}; {} += {})",
             var,
             start.into(),
             var,
             end.into(),
-            var
+            var,
+            step.into()
         );
         self.add_block(header, body_fn)
     }
@@ -493,7 +570,7 @@ impl FunctionBuilder {
     }
 
     /// Set the workgroup size.
-    pub fn launch_size(mut self, x: u32, y: Option<u32>, z: Option<u32>) -> Self {
+    pub fn launch_size(mut self, x: u32, y: u32, z: u32) -> Self {
         self.launch_size = Some(LaunchSize { x, y, z });
         self
     }
@@ -535,9 +612,10 @@ impl FunctionBuilder {
         var: impl Into<String>,
         start: impl Into<String>,
         end: impl Into<String>,
+        step: impl Into<String>,
         body_fn: impl FnOnce(BlockBuilder) -> BlockBuilder,
     ) -> Self {
-        self.body = self.body.add_for(var, start, end, body_fn);
+        self.body = self.body.add_for(var, start, end, step, body_fn);
         self
     }
 
@@ -577,7 +655,7 @@ mod tests {
             .add_storage_buffer(0, 0, "input", "array<f32>", AccessMode::Read)
             .add_storage_buffer(0, 1, "output", "array<f32>", AccessMode::Write)
             .add_function("main", |f| {
-                f.launch_size(64, None, None)
+                f.launch_size(64, 1, 1)
                     .add_parameter("index", "@builtin(global_invocation_id) vec3<u32>")
                     .add_line("let i = index.x;")
                     .add_line("output[i] = input[i] * 2.0;")
@@ -608,7 +686,7 @@ fn main(index: @builtin(global_invocation_id) vec3<u32>) {
             .add_uniform_buffer(0, 0, "params", "Params")
             .add_storage_buffer(0, 1, "data", "array<f32>", AccessMode::ReadWrite)
             .add_function("compute", |f| {
-                f.launch_size(256, None, None)
+                f.launch_size(256, 1, 1)
                     .add_parameter("id", "@builtin(global_invocation_id) vec3<u32>")
                     .add_line("let index = id.x;")
                     .add_if("index < arrayLength(&data)", |b| {
@@ -648,7 +726,7 @@ fn compute(id: @builtin(global_invocation_id) vec3<u32>) {
             .add_storage_buffer(0, 0, "input", "array<f32>", AccessMode::Read)
             .add_storage_buffer(0, 1, "output", "array<f32>", AccessMode::Write)
             .add_function("main", |f| {
-                f.launch_size(64, None, None)
+                f.launch_size(64, 1, 1)
                     .add_parameter("local_id", "@builtin(local_invocation_id) vec3<u32>")
                     .add_parameter("global_id", "@builtin(global_invocation_id) vec3<u32>")
                     .add_line("let lid = local_id.x;")
@@ -690,12 +768,12 @@ fn main(local_id: @builtin(local_invocation_id) vec3<u32>, global_id: @builtin(g
             .add_storage_buffer(0, 2, "matrix_c", "array<f32>", AccessMode::Write)
             .add_uniform_buffer(0, 3, "size", "u32")
             .add_function("matrix_multiply", |f| {
-                f.launch_size(16, Some(16), None)
+                f.launch_size(16, 16, 1)
                     .add_parameter("id", "@builtin(global_invocation_id) vec3<u32>")
                     .add_line("let row = id.y;")
                     .add_line("let col = id.x;")
                     .add_line("var sum = 0.0;")
-                    .add_for("k", "0u", "size", |b| {
+                    .add_for("k", "0u", "size", "1u", |b| {
                         b.add_line("let a_idx = row * size + k;")
                             .add_line("let b_idx = k * size + col;")
                             .add_line("sum += matrix_a[a_idx] * matrix_b[b_idx];")
@@ -716,7 +794,7 @@ fn matrix_multiply(id: @builtin(global_invocation_id) vec3<u32>) {
     let row = id.y;
     let col = id.x;
     var sum = 0.0;
-    for (var k: u32 = 0uu; k < size; k++) {
+    for (var k: u32 = 0u; k < size; k += 1u) {
         let a_idx = row * size + k;
         let b_idx = k * size + col;
         sum += matrix_a[a_idx] * matrix_b[b_idx];
@@ -749,7 +827,7 @@ fn matrix_multiply(id: @builtin(global_invocation_id) vec3<u32>) {
             .add_storage_buffer(0, 0, "vertices", "array<Vertex>", AccessMode::Read)
             .add_storage_buffer(0, 1, "output", "array<vec3<f32>>", AccessMode::Write)
             .add_function("process_vertices", |f| {
-                f.launch_size(64, None, None)
+                f.launch_size(64, 1, 1)
                     .add_parameter("index", "@builtin(global_invocation_id) vec3<u32>")
                     .add_line("let i = index.x;")
                     .add_if("i < arrayLength(&vertices)", |b| {
@@ -799,7 +877,7 @@ fn process_vertices(index: @builtin(global_invocation_id) vec3<u32>) {
                     .add_line("return value * 2.0;")
             })
             .add_function("main", |f| {
-                f.launch_size(64, None, None)
+                f.launch_size(64, 1, 1)
                     .add_parameter("id", "@builtin(global_invocation_id) vec3<u32>")
                     .add_line("let index = id.x;")
                     .add_line("data[index] = helper(data[index]);")
@@ -831,12 +909,12 @@ fn main(id: @builtin(global_invocation_id) vec3<u32>) {
             .add_storage_buffer(0, 0, "input", "array<f32>", AccessMode::Read)
             .add_storage_buffer(0, 1, "output", "array<f32>", AccessMode::Write)
             .add_function("vector_dot_product", |f| {
-                f.launch_size(64, None, None)
+                f.launch_size(64, 1, 1)
                     .add_parameter("id", "@builtin(global_invocation_id) vec3<u32>")
                     .add_line("let base_idx = id.x * 4u;")
                     .add_line("var sum = 0.0;")
-                    .add_unrolled_loop("i", 0..4, |_var, iteration, body| {
-                        body.add_line(format!(
+                    .add_unrolled_loop("i", 0..4, |_var, iteration, b| {
+                        b.add_line(format!(
                             "sum += input[base_idx + {}u] * input[base_idx + {}u];",
                             iteration, iteration
                         ))
@@ -873,13 +951,13 @@ fn vector_dot_product(id: @builtin(global_invocation_id) vec3<u32>) {
             .add_storage_buffer(0, 2, "result", "array<f32>", AccessMode::Write)
             .add_uniform_buffer(0, 3, "size", "u32")
             .add_function("unrolled_matrix_multiply", |f| {
-                f.launch_size(16, Some(16), None)
+                f.launch_size(16, 16, 1)
                     .add_parameter("id", "@builtin(global_invocation_id) vec3<u32>")
                     .add_line("let row = id.y;")
                     .add_line("let col = id.x;")
                     .add_line("var sum = 0.0;")
-                    .add_unrolled_loop("k", 0..8, |_var, k, body| {
-                        body.add_line(format!("let a_idx_{} = row * size + {}u;", k, k))
+                    .add_unrolled_loop("k", 0..8, |_var, k, b| {
+                        b.add_line(format!("let a_idx_{} = row * size + {}u;", k, k))
                             .add_line(format!("let b_idx_{} = {}u * size + col;", k, k))
                             .add_line(format!(
                                 "sum += matrix_a[a_idx_{}] * matrix_b[b_idx_{}];",
