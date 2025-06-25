@@ -174,6 +174,19 @@ pub struct LaunchSize {
 }
 
 #[derive(Debug, Clone)]
+pub struct Constant {
+    pub name: String,
+    pub r#type: String,
+    pub value: String,
+}
+
+impl std::fmt::Display for Constant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "const {}: {} = {};", self.name, self.r#type, self.value)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Variable {
     pub name: String,
     pub r#type: String,
@@ -199,12 +212,26 @@ impl std::fmt::Display for Variable {
 }
 
 #[derive(Debug, Clone)]
+pub struct Block {
+    pub lines: Vec<String>,
+}
+
+impl std::fmt::Display for Block {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for line in &self.lines {
+            writeln!(f, "{}", line)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Function {
     pub name: String,
     pub launch_size: Option<LaunchSize>,
     pub parameters: Vec<Field>,
     pub return_type: Option<String>,
-    pub body: Vec<String>,
+    pub body: Block,
 }
 
 impl std::fmt::Display for Function {
@@ -228,10 +255,7 @@ impl std::fmt::Display for Function {
             None => writeln!(f, ") {{")?,
         }
 
-        for line in &self.body {
-            writeln!(f, "    {}", line)?;
-        }
-
+        write!(f, "{}", self.body)?;
         writeln!(f, "}}")
     }
 }
@@ -266,19 +290,6 @@ impl std::fmt::Display for Field {
             false => format!("{} ", self.attributes.join(" ")),
         };
         write!(f, "{}{}: {}", attrs, self.name, self.r#type)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Constant {
-    pub name: String,
-    pub r#type: String,
-    pub value: String,
-}
-
-impl std::fmt::Display for Constant {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "const {}: {} = {};", self.name, self.r#type, self.value)
     }
 }
 
@@ -478,6 +489,7 @@ impl StructBuilder {
         });
         self
     }
+
     /// Finish building the struct.
     pub fn build(self) -> Struct {
         Struct {
@@ -488,24 +500,21 @@ impl StructBuilder {
 }
 
 /// Builder for a code block encapsulated by `{}`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct BlockBuilder {
     lines: Vec<String>,
-    indent: usize,
 }
 
 impl BlockBuilder {
     /// Create a new body builder.
-    pub fn new(indent: usize) -> Self {
-        let lines = Vec::new();
-        Self { lines, indent }
+    pub fn new() -> Self {
+        Self { lines: Vec::new() }
     }
 
     /// Add a line to the body.
     pub fn add_line(mut self, line: impl Into<String>) -> Self {
         let line = line.into();
-        let indentation = "    ".repeat(self.indent);
-        self.lines.push(format!("{}{}", indentation, line));
+        self.lines.push(line);
         self
     }
 
@@ -514,18 +523,39 @@ impl BlockBuilder {
     where
         F: FnOnce(BlockBuilder) -> BlockBuilder,
     {
-        let header = header.into();
-        let indentation = "    ".repeat(self.indent);
-        self.lines.push(format!("{}{} {{", indentation, header));
-
-        let inner_builder = f(BlockBuilder::new(self.indent + 1));
-
-        for line in inner_builder.lines {
-            self.lines.push(format!("{    }{}", indentation, line));
+        let header: String = header.into();
+        let header = header.trim();
+        match header.is_empty() {
+            true => self.lines.push("{".into()),
+            false => self.lines.push(format!("{} {{", header)),
         }
 
-        self.lines.push(format!("{}}}", indentation));
+        let inner = f(BlockBuilder::new()).build();
+        for line in inner.lines {
+            self.lines.push(line);
+        }
+
+        self.lines.push("}".into());
         self
+    }
+
+    pub fn add_block_mut<F>(&mut self, header: impl Into<String>, f: F)
+    where
+        F: FnOnce(BlockBuilder) -> BlockBuilder,
+    {
+        let header: String = header.into();
+        let header = header.trim();
+        match header.is_empty() {
+            true => self.lines.push("{".into()),
+            false => self.lines.push(format!("{} {{", header)),
+        }
+
+        let inner = f(BlockBuilder::new()).build();
+        for line in inner.lines {
+            self.lines.push(line);
+        }
+
+        self.lines.push("}".into());
     }
 
     /// Add an if statement.
@@ -559,6 +589,20 @@ impl BlockBuilder {
         self.add_block(header, body_fn)
     }
 
+    /// Add an if statement with a constant condition.
+    pub fn add_const_if(
+        self,
+        condition: bool,
+        false_fn: impl FnOnce(BlockBuilder) -> BlockBuilder,
+        true_fn: impl FnOnce(BlockBuilder) -> BlockBuilder,
+    ) -> Self {
+        let body_fn = |b| match condition {
+            false => false_fn(b),
+            true => true_fn(b),
+        };
+        self.add_block("", body_fn)
+    }
+
     /// Add an unrolled loop by generating the body multiple times.
     /// This is useful for small, fixed iteration counts where unrolling can improve performance.
     pub fn add_unrolled_loop<I, F>(
@@ -572,18 +616,19 @@ impl BlockBuilder {
     {
         let var_name = var.into();
         for i in iter.into_iter() {
-            let block_builder = BlockBuilder::new(self.indent);
-            let updated_builder = body_fn(&var_name, i, block_builder);
-            for line in updated_builder.lines {
-                self.lines.push(line);
-            }
+            self.add_block_mut("", |b| body_fn(&var_name, i, b));
         }
         self
     }
 
     /// Build the block.
-    pub fn build(self) -> Vec<String> {
-        self.lines
+    pub fn build(self) -> Block {
+        let lines = self
+            .lines
+            .into_iter()
+            .map(|line| format!("    {}", line))
+            .collect();
+        Block { lines }
     }
 }
 
@@ -603,7 +648,7 @@ impl FunctionBuilder {
         let launch_size = None;
         let parameters = Vec::new();
         let return_type = None;
-        let body = BlockBuilder::new(0);
+        let body = BlockBuilder::new();
         Self {
             name,
             launch_size,
@@ -1014,10 +1059,18 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 fn vector_dot_product(@builtin(global_invocation_id) id: vec3<u32>) {
     let base_idx = id.x * 4u;
     var sum = 0.0;
-    sum += input[base_idx + 0u] * input[base_idx + 0u];
-    sum += input[base_idx + 1u] * input[base_idx + 1u];
-    sum += input[base_idx + 2u] * input[base_idx + 2u];
-    sum += input[base_idx + 3u] * input[base_idx + 3u];
+    {
+        sum += input[base_idx + 0u] * input[base_idx + 0u];
+    }
+    {
+        sum += input[base_idx + 1u] * input[base_idx + 1u];
+    }
+    {
+        sum += input[base_idx + 2u] * input[base_idx + 2u];
+    }
+    {
+        sum += input[base_idx + 3u] * input[base_idx + 3u];
+    }
     output[id.x] = sum;
 }
 
@@ -1067,30 +1120,46 @@ fn unrolled_matrix_multiply(@builtin(global_invocation_id) id: vec3<u32>) {
     let row = id.y;
     let col = id.x;
     var sum = 0.0;
-    let a_idx_0 = row * size + 0u;
-    let b_idx_0 = 0u * size + col;
-    sum += matrix_a[a_idx_0] * matrix_b[b_idx_0];
-    let a_idx_1 = row * size + 1u;
-    let b_idx_1 = 1u * size + col;
-    sum += matrix_a[a_idx_1] * matrix_b[b_idx_1];
-    let a_idx_2 = row * size + 2u;
-    let b_idx_2 = 2u * size + col;
-    sum += matrix_a[a_idx_2] * matrix_b[b_idx_2];
-    let a_idx_3 = row * size + 3u;
-    let b_idx_3 = 3u * size + col;
-    sum += matrix_a[a_idx_3] * matrix_b[b_idx_3];
-    let a_idx_4 = row * size + 4u;
-    let b_idx_4 = 4u * size + col;
-    sum += matrix_a[a_idx_4] * matrix_b[b_idx_4];
-    let a_idx_5 = row * size + 5u;
-    let b_idx_5 = 5u * size + col;
-    sum += matrix_a[a_idx_5] * matrix_b[b_idx_5];
-    let a_idx_6 = row * size + 6u;
-    let b_idx_6 = 6u * size + col;
-    sum += matrix_a[a_idx_6] * matrix_b[b_idx_6];
-    let a_idx_7 = row * size + 7u;
-    let b_idx_7 = 7u * size + col;
-    sum += matrix_a[a_idx_7] * matrix_b[b_idx_7];
+    {
+        let a_idx_0 = row * size + 0u;
+        let b_idx_0 = 0u * size + col;
+        sum += matrix_a[a_idx_0] * matrix_b[b_idx_0];
+    }
+    {
+        let a_idx_1 = row * size + 1u;
+        let b_idx_1 = 1u * size + col;
+        sum += matrix_a[a_idx_1] * matrix_b[b_idx_1];
+    }
+    {
+        let a_idx_2 = row * size + 2u;
+        let b_idx_2 = 2u * size + col;
+        sum += matrix_a[a_idx_2] * matrix_b[b_idx_2];
+    }
+    {
+        let a_idx_3 = row * size + 3u;
+        let b_idx_3 = 3u * size + col;
+        sum += matrix_a[a_idx_3] * matrix_b[b_idx_3];
+    }
+    {
+        let a_idx_4 = row * size + 4u;
+        let b_idx_4 = 4u * size + col;
+        sum += matrix_a[a_idx_4] * matrix_b[b_idx_4];
+    }
+    {
+        let a_idx_5 = row * size + 5u;
+        let b_idx_5 = 5u * size + col;
+        sum += matrix_a[a_idx_5] * matrix_b[b_idx_5];
+    }
+    {
+        let a_idx_6 = row * size + 6u;
+        let b_idx_6 = 6u * size + col;
+        sum += matrix_a[a_idx_6] * matrix_b[b_idx_6];
+    }
+    {
+        let a_idx_7 = row * size + 7u;
+        let b_idx_7 = 7u * size + col;
+        sum += matrix_a[a_idx_7] * matrix_b[b_idx_7];
+    }
     let result_idx = row * size + col;
     result[result_idx] = sum;
 }
