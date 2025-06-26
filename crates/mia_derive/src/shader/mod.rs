@@ -1,185 +1,126 @@
-use half::f16;
 use proc_macro2::TokenStream;
 use quote::quote;
-use rustc_hash::FxHashMap as HashMap;
-use syn::{parse_quote, spanned::Spanned};
+use syn::{Attribute, DeriveInput, LitStr, Path, spanned::Spanned};
 
-use r#type::ShaderType;
+pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
+    // parse shader_type attributes
+    let mut crate_name = None;
+    for attr in &input.attrs {
+        if !attr.path().is_ident("shader_type") {
+            continue;
+        }
 
-mod r#type;
-
-type TypeMap = HashMap<syn::Type, (naga::Type, usize)>;
-type TypeHandleMap = HashMap<syn::Type, (naga::Handle<naga::Type>, usize)>;
-
-pub fn shader(input: syn::ItemFn) -> Result<TokenStream, syn::Error> {
-    let mut module = naga::Module::default();
-
-    let _types = collect_types(&mut module, &input.block.stmts)?;
-
-    Ok(quote! {})
-}
-
-fn shader_ir<T: ShaderType<naga::Type>>() -> naga::Type {
-    T::to_shader_ir()
-}
-
-pub trait SpanToNaga {
-    fn to_naga(&self) -> naga::Span;
-}
-
-impl SpanToNaga for proc_macro2::Span {
-    fn to_naga(&self) -> naga::Span {
-        let range = self.byte_range();
-        naga::Span::new(range.start as u32, range.end as u32)
-    }
-}
-
-/// Scan the stmts and collect all types used in the shader.
-/// Add all types to the module and return a map of type to handle and offset.
-fn collect_types(
-    module: &mut naga::Module,
-    stmts: &[syn::Stmt],
-) -> Result<TypeHandleMap, syn::Error> {
-    let mut builtin_types = TypeMap::default();
-    builtin_types.insert(parse_quote!(f16), (shader_ir::<f16>(), size_of::<f16>()));
-    builtin_types.insert(parse_quote!(f32), (shader_ir::<f32>(), size_of::<f32>()));
-    builtin_types.insert(parse_quote!(u32), (shader_ir::<u32>(), size_of::<u32>()));
-    builtin_types.insert(parse_quote!(u64), (shader_ir::<u64>(), size_of::<u64>()));
-    builtin_types.insert(parse_quote!(i32), (shader_ir::<i32>(), size_of::<i32>()));
-    builtin_types.insert(parse_quote!(i64), (shader_ir::<i64>(), size_of::<i64>()));
-    builtin_types.insert(parse_quote!(bool), (shader_ir::<bool>(), size_of::<bool>()));
-
-    let mut types = TypeHandleMap::default();
-    for stmt in stmts {
-        match stmt {
-            syn::Stmt::Local(_local) => todo!(),
-            syn::Stmt::Item(item) => {
-                if let syn::Item::Struct(item_struct) = item {
-                    if item_struct.fields.is_empty() {
-                        return Err(syn::Error::new_spanned(
-                            item_struct,
-                            "struct must have at least one field",
-                        ));
-                    }
-
-                    let mut offset = 0;
-                    let mut members = Vec::new();
-                    for field in &item_struct.fields {
-                        let binding = parse_field_binding(&field.attrs)?;
-                        if let Some(&(ty, size)) = types.get(&field.ty) {
-                            let name = field.ident.as_ref().map(ToString::to_string);
-                            members.push(naga::StructMember {
-                                name,
-                                ty,
-                                offset,
-                                binding,
-                            });
-                            offset += size as u32;
-                        } else if let Some((ty, size)) = builtin_types.get(&field.ty).cloned() {
-                            let ty = module.types.insert(ty, field.span().to_naga());
-                            let name = field.ident.as_ref().map(ToString::to_string);
-                            members.push(naga::StructMember {
-                                name,
-                                ty,
-                                offset,
-                                binding,
-                            });
-                            offset += size as u32;
-                        } else {
-                            return Err(syn::Error::new_spanned(field, "unsupported type"));
-                        }
-                    }
-
-                    let span = offset;
-                    let inner = naga::TypeInner::Struct { members, span };
-                    let name = Some(item_struct.ident.to_string());
-                    let ty = naga::Type { inner, name };
-                    let handle = module
-                        .types
-                        .insert(ty.clone(), item_struct.span().to_naga());
-                    let ident = &item_struct.ident;
-                    types.insert(parse_quote!(#ident), (handle, offset as usize));
-                }
+        let result = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("crate") {
+                let value = meta.value()?;
+                let s: LitStr = value.parse()?;
+                crate_name = Some(s.parse::<Path>()?);
+                Ok(())
+            } else {
+                Err(meta.error("unexpected attribute; supported are `crate` and `bound`"))
             }
-            syn::Stmt::Expr(_expr, _semi) => todo!(),
-            syn::Stmt::Macro(_stmt_macro) => todo!(),
+        });
+
+        if let Err(err) = result {
+            return err.to_compile_error();
         }
     }
-    Ok(types)
-}
+    // determine the base path for trait implementation
+    let base_path = match crate_name {
+        Some(path) => quote!(#path::hal::gpu::shader),
+        None => quote!(::mia::hal::gpu::shader),
+    };
 
-fn parse_field_binding(attrs: &[syn::Attribute]) -> Result<Option<naga::Binding>, syn::Error> {
-    for attr in attrs {
-        if attr.path().is_ident("builtin") {
-            let builtin_name: syn::Ident = attr.parse_args()?;
-            let builtin = match builtin_name.to_string().as_str() {
-                "position" => naga::BuiltIn::Position { invariant: false },
-                "position_invariant" => naga::BuiltIn::Position { invariant: true },
-                "view_index" => naga::BuiltIn::ViewIndex,
-                // vertex
-                "base_instance" => naga::BuiltIn::BaseInstance,
-                "base_vertex" => naga::BuiltIn::BaseVertex,
-                "clip_distance" => naga::BuiltIn::ClipDistance,
-                "cull_distance" => naga::BuiltIn::CullDistance,
-                "instance_index" => naga::BuiltIn::InstanceIndex,
-                "point_size" => naga::BuiltIn::PointSize,
-                "vertex_index" => naga::BuiltIn::VertexIndex,
-                "draw_id" => naga::BuiltIn::DrawID,
-                // fragment
-                "frag_depth" => naga::BuiltIn::FragDepth,
-                "point_coord" => naga::BuiltIn::PointCoord,
-                "front_facing" => naga::BuiltIn::FrontFacing,
-                "primitive_index" => naga::BuiltIn::PrimitiveIndex,
-                "sample_index" => naga::BuiltIn::SampleIndex,
-                "sample_mask" => naga::BuiltIn::SampleMask,
-                // compute
-                "global_invocation_id" => naga::BuiltIn::GlobalInvocationId,
-                "local_invocation_id" => naga::BuiltIn::LocalInvocationId,
-                "local_invocation_index" => naga::BuiltIn::LocalInvocationIndex,
-                "workgroup_id" => naga::BuiltIn::WorkGroupId,
-                "workgroup_size" => naga::BuiltIn::WorkGroupSize,
-                "num_workgroups" => naga::BuiltIn::NumWorkGroups,
-                // subgroup
-                "num_subgroups" => naga::BuiltIn::NumSubgroups,
-                "subgroup_id" => naga::BuiltIn::SubgroupId,
-                "subgroup_size" => naga::BuiltIn::SubgroupSize,
-                "subgroup_invocation_id" => naga::BuiltIn::SubgroupInvocationId,
-                _ => return Err(syn::Error::new_spanned(&builtin_name, "unknown builtin")),
+    let struct_name = &input.ident;
+
+    // retrieve struct field information
+    let fields = match &input.data {
+        syn::Data::Struct(data_struct) => &data_struct.fields,
+        _ => {
+            return syn::Error::new(input.span(), "`ShaderType` can only be derived for structs")
+                .to_compile_error();
+        }
+    };
+
+    let members: TokenStream = fields
+        .iter()
+        .map(|field| {
+            let field_name = &field.ident;
+            let name = match field_name {
+                Some(ident) => {
+                    let name = ident.to_string();
+                    quote!(Some(#name.to_string()))
+                }
+                None => quote!(None),
             };
-            return Ok(Some(naga::Binding::BuiltIn(builtin)));
-        } else if attr.path().is_ident("location") {
-            let location: syn::LitInt = attr.parse_args()?;
-            let location_value = location.base10_parse::<u32>()?;
-            return Ok(Some(naga::Binding::Location {
-                location: location_value,
-                interpolation: None,
-                sampling: None,
-                blend_src: None,
-            }));
+            let ty = &field.ty;
+            let ty = quote!(<#ty as #base_path::ShaderType>::shader_type(types));
+            let binding = parse_binding(&field.attrs);
+            let offset = quote!(::bytemuck::offset_of!(#struct_name, #field_name) as u32);
+            quote! {
+                members.push(::naga::StructMember {
+                    name: #name,
+                    ty: #ty,
+                    binding: #binding,
+                    offset: #offset,
+                });
+            }
+        })
+        .collect();
+
+    let name = struct_name.to_string();
+    quote! {
+        impl #base_path::ShaderType for #struct_name {
+            fn shader_type(types: &mut ::naga::UniqueArena<::naga::Type>) -> ::naga::Handle<::naga::Type> {
+                let name = Some(#name.to_string());
+                let members = {
+                    let mut members = Vec::new();
+                    #members;
+                    members
+                };
+                let span = ::std::mem::size_of::<#struct_name>() as u32;
+                let inner = TypeInner::Struct { members, span };
+                let r#type = Type { name, inner };
+                types.insert(r#type, Default::default())
+            }
         }
     }
-    Ok(None)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+fn parse_binding(attrs: &[Attribute]) -> TokenStream {
+    let mut builtin = None;
 
-    #[test]
-    fn test_collect_types() {
-        let input: syn::ItemFn = parse_quote! {
-            fn main() {
-                struct Vertex {
-                    #[builtin(position)]
-                    position: f32,
-                    #[builtin(vertex_index)]
-                    vertex_index: u32,
-                }
+    for attr in attrs.iter() {
+        if !attr.path().is_ident("shader_type") {
+            continue;
+        }
+
+        let result = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("builtin") {
+                let value = meta.value()?;
+                let s: LitStr = value.parse()?;
+                builtin = match s.value().as_str() {
+                    "uid" => Some(quote!(::naga::BuiltIn::GlobalInvocationId)),
+                    "tid" => Some(quote!(::naga::BuiltIn::LocalInvocationId)),
+                    "index" => Some(quote!(::naga::BuiltIn::LocalInvocationIndex)),
+                    "bid" => Some(quote!(::naga::BuiltIn::WorkGroupId)),
+                    "bs" => Some(quote!(::naga::BuiltIn::WorkGroupSize)),
+                    "nb" => Some(quote!(::naga::BuiltIn::NumWorkGroups)),
+                    _ => return Err(meta.error("unexpected builtin")),
+                };
+                Ok(())
+            } else {
+                Err(meta.error("unexpected attribute; supported is `builtin`"))
             }
-        };
-        let mut module = naga::Module::default();
-        let types = collect_types(&mut module, &input.block.stmts).unwrap();
-        assert_eq!(types.len(), 1);
-        assert_eq!(module.types.len(), 3);
+        });
+
+        if let Err(err) = result {
+            return err.to_compile_error();
+        }
+    }
+
+    match builtin {
+        Some(builtin) => quote!(Some(::naga::Binding::BuiltIn(#builtin))),
+        None => quote!(None),
     }
 }

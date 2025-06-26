@@ -1,5 +1,5 @@
 use proc_macro::TokenStream;
-use syn::{DeriveInput, ItemFn, LitInt, parse_macro_input};
+use syn::{DeriveInput, LitInt, parse_macro_input};
 
 mod api;
 mod ops;
@@ -19,12 +19,19 @@ pub fn build_api(input: TokenStream) -> TokenStream {
     expanded.into()
 }
 
-#[proc_macro_attribute]
-pub fn shader(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(item as ItemFn);
-    let expanded = match shader::shader(input) {
-        Ok(expanded) => expanded,
-        Err(err) => err.to_compile_error(),
-    };
+// #[proc_macro_attribute]
+// pub fn shader(_attr: TokenStream, item: TokenStream) -> TokenStream {
+//     let input = parse_macro_input!(item as ItemFn);
+//     let expanded = match shader::shader(input) {
+//         Ok(expanded) => expanded,
+//         Err(err) => err.to_compile_error(),
+//     };
+//     expanded.into()
+// }
+
+#[proc_macro_derive(ShaderType, attributes(shader_type))]
+pub fn shader_type(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let expanded = shader::derive_shader_type(input);
     expanded.into()
 }
