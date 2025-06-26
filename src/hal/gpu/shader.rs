@@ -1,5 +1,5 @@
 use half::f16;
-use naga::{Module, Scalar, Type, TypeInner, VectorSize};
+use naga::{Expression, Literal, Module, Scalar, Type, TypeInner, VectorSize};
 
 /// The type can be convert to an IR node in the shader.
 pub trait ShaderType<T> {
@@ -7,24 +7,24 @@ pub trait ShaderType<T> {
     fn to_shader_ir() -> T;
 }
 
-macro_rules! impl_scalar {
-    ($type:ty, $scalar:expr) => {
+macro_rules! impl_shader_type_scalar {
+    ($type:ty, $scalar:ident) => {
         impl ShaderType<Scalar> for $type {
             fn to_shader_ir() -> Scalar {
-                $scalar
+                Scalar::$scalar
             }
         }
     };
 }
 
-impl_scalar!(f16, Scalar::F16);
-impl_scalar!(f32, Scalar::F32);
-impl_scalar!(f64, Scalar::F64);
-impl_scalar!(u32, Scalar::U32);
-impl_scalar!(u64, Scalar::U64);
-impl_scalar!(i32, Scalar::I32);
-impl_scalar!(i64, Scalar::I64);
-impl_scalar!(bool, Scalar::BOOL);
+impl_shader_type_scalar!(f16, F16);
+impl_shader_type_scalar!(f32, F32);
+impl_shader_type_scalar!(f64, F64);
+impl_shader_type_scalar!(u32, U32);
+impl_shader_type_scalar!(u64, U64);
+impl_shader_type_scalar!(i32, I32);
+impl_shader_type_scalar!(i64, I64);
+impl_shader_type_scalar!(bool, BOOL);
 
 impl<T> ShaderType<TypeInner> for T
 where
@@ -48,7 +48,7 @@ where
 
 pub struct Vector<T, const N: usize>([T; N]);
 
-macro_rules! impl_type_scalar_vector {
+macro_rules! impl_shader_type_vector {
     ($size:literal, $vector_size:expr) => {
         impl<T> ShaderType<TypeInner> for Vector<T, $size>
         where
@@ -75,13 +75,13 @@ macro_rules! impl_type_scalar_vector {
     };
 }
 
-impl_type_scalar_vector!(2, VectorSize::Bi);
-impl_type_scalar_vector!(3, VectorSize::Tri);
-impl_type_scalar_vector!(4, VectorSize::Quad);
+impl_shader_type_vector!(2, VectorSize::Bi);
+impl_shader_type_vector!(3, VectorSize::Tri);
+impl_shader_type_vector!(4, VectorSize::Quad);
 
 pub struct Matrix<T, const M: usize, const N: usize>([[T; N]; M]);
 
-macro_rules! impl_type_scalar_matrix {
+macro_rules! impl_shader_type_matrix {
     ($m:literal, $n:literal, $vm:expr, $vn:expr) => {
         impl<T> ShaderType<TypeInner> for Matrix<T, $m, $n>
         where
@@ -109,18 +109,46 @@ macro_rules! impl_type_scalar_matrix {
     };
 }
 
-impl_type_scalar_matrix!(2, 2, VectorSize::Bi, VectorSize::Bi);
-impl_type_scalar_matrix!(2, 3, VectorSize::Bi, VectorSize::Tri);
-impl_type_scalar_matrix!(2, 4, VectorSize::Bi, VectorSize::Quad);
-impl_type_scalar_matrix!(3, 2, VectorSize::Tri, VectorSize::Bi);
-impl_type_scalar_matrix!(3, 3, VectorSize::Tri, VectorSize::Tri);
-impl_type_scalar_matrix!(3, 4, VectorSize::Tri, VectorSize::Quad);
-impl_type_scalar_matrix!(4, 2, VectorSize::Quad, VectorSize::Bi);
-impl_type_scalar_matrix!(4, 3, VectorSize::Quad, VectorSize::Tri);
-impl_type_scalar_matrix!(4, 4, VectorSize::Quad, VectorSize::Quad);
+impl_shader_type_matrix!(2, 2, VectorSize::Bi, VectorSize::Bi);
+impl_shader_type_matrix!(2, 3, VectorSize::Bi, VectorSize::Tri);
+impl_shader_type_matrix!(2, 4, VectorSize::Bi, VectorSize::Quad);
+impl_shader_type_matrix!(3, 2, VectorSize::Tri, VectorSize::Bi);
+impl_shader_type_matrix!(3, 3, VectorSize::Tri, VectorSize::Tri);
+impl_shader_type_matrix!(3, 4, VectorSize::Tri, VectorSize::Quad);
+impl_shader_type_matrix!(4, 2, VectorSize::Quad, VectorSize::Bi);
+impl_shader_type_matrix!(4, 3, VectorSize::Quad, VectorSize::Tri);
+impl_shader_type_matrix!(4, 4, VectorSize::Quad, VectorSize::Quad);
 
 /// The type's value can be convert to an IR node in the shader.
 pub trait ShaderValue<T> {
     /// Converts this value into its shader IR.
     fn to_shader_ir(&self, module: &Module) -> T;
+}
+
+macro_rules! impl_shader_value_literal {
+    ($type:ty, $literal:ident) => {
+        impl ShaderValue<Literal> for $type {
+            fn to_shader_ir(&self, _: &Module) -> Literal {
+                Literal::$literal(*self)
+            }
+        }
+    };
+}
+
+impl_shader_value_literal!(f16, F16);
+impl_shader_value_literal!(f32, F32);
+impl_shader_value_literal!(f64, F64);
+impl_shader_value_literal!(u32, U32);
+impl_shader_value_literal!(u64, U64);
+impl_shader_value_literal!(i32, I32);
+impl_shader_value_literal!(i64, I64);
+impl_shader_value_literal!(bool, Bool);
+
+impl<T> ShaderValue<Expression> for T
+where
+    T: ShaderValue<Literal>,
+{
+    fn to_shader_ir(&self, module: &Module) -> Expression {
+        Expression::Literal(self.to_shader_ir(module))
+    }
 }
