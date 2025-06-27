@@ -6,7 +6,7 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
     // parse shader_type attributes
     let mut crate_name = None;
     for attr in &input.attrs {
-        if !attr.path().is_ident("shader_type") {
+        if !attr.path().is_ident("shader") {
             continue;
         }
 
@@ -91,7 +91,7 @@ fn parse_binding(attrs: &[Attribute]) -> TokenStream {
     let mut builtin = None;
 
     for attr in attrs.iter() {
-        if !attr.path().is_ident("shader_type") {
+        if !attr.path().is_ident("shader") {
             continue;
         }
 
