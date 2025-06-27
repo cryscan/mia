@@ -1,5 +1,4 @@
 use crate::loom::{layout::Layout, num::DataType};
-use mia_derive::ShaderType;
 
 pub mod shader;
 
@@ -17,8 +16,7 @@ pub struct Launch {
 }
 
 /// A bundle of layouts that defines the mapping from GPU grid to buffer indices.
-#[derive(Debug, Default, Clone, ShaderType)]
-#[shader(crate = "crate")]
+#[derive(Debug, Default, Clone)]
 pub struct LayoutBundle {
     /// The block-level layout defining how thread blocks are arranged in the grid.
     pub block: Layout,
