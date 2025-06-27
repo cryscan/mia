@@ -206,9 +206,10 @@ impl TensorTape {
         let mut s = "graph TD\n".to_string();
 
         for (index, op) in self.ops.iter().enumerate() {
-            let op_node = format!("op_{}", index);
-            let op_label = format!("{}", op.name());
-            s.push_str(&format!("    {}[\"{}\"]\n", op_node, op_label));
+            let op_name = op.name();
+            let op_node = format!("op_{index}");
+            let op_label = format!("{op_name}");
+            s.push_str(&format!("    {op_node}[\"{op_label}\"]\n"));
 
             for ir in op.io() {
                 let tensor_node = format!("tensor_{}", ir.id);
@@ -216,12 +217,12 @@ impl TensorTape {
 
                 match ir.access {
                     Access::ReadOnly => {
-                        s.push_str(&format!("    {}((\"{}\"))\n", tensor_node, tensor_label));
-                        s.push_str(&format!("    {} --> |Read| {}\n", tensor_node, op_node));
+                        s.push_str(&format!("    {tensor_node}((\"{tensor_label}\"))\n"));
+                        s.push_str(&format!("    {tensor_node} --> |Read| {op_node}\n"));
                     }
                     Access::WriteOnly => {
-                        s.push_str(&format!("    {}((\"{}\"))\n", tensor_node, tensor_label));
-                        s.push_str(&format!("    {} --> |Write| {}\n", op_node, tensor_node));
+                        s.push_str(&format!("    {tensor_node}((\"{tensor_label}\"))\n"));
+                        s.push_str(&format!("    {op_node} --> |Write| {tensor_node}\n"));
                     }
                     _ => {}
                 }

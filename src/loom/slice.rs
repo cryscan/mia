@@ -122,9 +122,7 @@ impl<D: Device, T: Scalar> Tensor<D, T> {
                     Axis::One(index) => Some((index, shape)),
                 })
                 .all(|(index, shape)| index < shape),
-            "slice contains out-of-bounds indices: {:?} for shape {:?}",
-            slice,
-            shape
+            "slice contains out-of-bounds indices: {slice:?} for shape {shape:?}",
         );
         let tensor = self;
         TensorSlice { tensor, slice }

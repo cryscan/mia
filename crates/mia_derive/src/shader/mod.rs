@@ -79,8 +79,8 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
                     members
                 };
                 let span = ::std::mem::size_of::<#struct_name>() as u32;
-                let inner = TypeInner::Struct { members, span };
-                let r#type = Type { name, inner };
+                let inner = ::naga::TypeInner::Struct { members, span };
+                let r#type = ::naga::Type { name, inner };
                 types.insert(r#type, Default::default())
             }
         }

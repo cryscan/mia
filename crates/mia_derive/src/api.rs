@@ -6,7 +6,7 @@ pub fn build_api(input: LitInt) -> TokenStream {
     let n = input.base10_parse::<usize>().unwrap();
 
     let tensor_params = (0..n)
-        .map(|i| syn::Ident::new(&format!("t{}", i), proc_macro2::Span::call_site()))
+        .map(|i| syn::Ident::new(&format!("t{i}"), proc_macro2::Span::call_site()))
         .collect::<Vec<_>>();
 
     let tape_clones = tensor_params
@@ -26,7 +26,7 @@ pub fn build_api(input: LitInt) -> TokenStream {
         F: FnOnce(InnerOp<#n, 1>) -> Op,
     };
 
-    let fn_name = syn::Ident::new(&format!("build_api_{}", n), proc_macro2::Span::call_site());
+    let fn_name = syn::Ident::new(&format!("build_api_{n}"), proc_macro2::Span::call_site());
 
     quote! {
         #[allow(unused)]

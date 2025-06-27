@@ -88,10 +88,8 @@ impl_shader_type_matrix!(4, 4, Quad, Quad);
 
 #[cfg(test)]
 mod tests {
+    use super::ShaderType;
     use mia_derive::ShaderType;
-    use naga::{Type, UniqueArena};
-
-    use super::*;
 
     #[test]
     fn test_derive_shader_type() {
@@ -105,7 +103,7 @@ mod tests {
             index: u32,
         }
 
-        let mut types = UniqueArena::new();
+        let mut types = naga::UniqueArena::new();
         let ty = Data::shader_type(&mut types);
         println!("{:#?}", types.get_handle(ty).expect("failed to find type"));
         assert_eq!(types.len(), 4);
