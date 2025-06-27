@@ -42,9 +42,26 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
         }
     };
 
+    let offsets = fields.iter().scan(quote!(0usize), |offset, field| {
+        let ty = &field.ty;
+        let align = quote!(<#ty as #base_path::ShaderType>::ALIGN);
+        let output = quote! {
+            let offset = #offset;
+            let align = #align;
+            offset.div_ceil(align) * align
+        };
+        *offset = quote!(#offset + <#ty as #base_path::ShaderType>::SIZE);
+        Some(output)
+    });
+    let size = fields.iter().fold(quote!(0usize), |acc, field| {
+        let ty = &field.ty;
+        quote!(#acc + <#ty as #base_path::ShaderType>::SIZE)
+    });
+
     let members: TokenStream = fields
         .iter()
-        .map(|field| {
+        .zip(offsets)
+        .map(|(field, offset)| {
             let field_name = &field.ident;
             let name = match field_name {
                 Some(ident) => {
@@ -56,13 +73,13 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
             let ty = &field.ty;
             let ty = quote!(<#ty as #base_path::ShaderType>::shader_type(types));
             let binding = parse_binding(&field.attrs);
-            let offset = quote!(::bytemuck::offset_of!(#struct_name, #field_name) as u32);
+            // let offset = quote!(::bytemuck::offset_of!(#struct_name, #field_name) as u32);
             quote! {
                 members.push(::naga::StructMember {
                     name: #name,
                     ty: #ty,
                     binding: #binding,
-                    offset: #offset,
+                    offset: { #offset } as u32,
                 });
             }
         })
@@ -78,7 +95,7 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
                     #members;
                     members
                 };
-                let span = ::std::mem::size_of::<#struct_name>() as u32;
+                let span = { #size } as u32;
                 let inner = ::naga::TypeInner::Struct { members, span };
                 let r#type = ::naga::Type { name, inner };
                 types.insert(r#type, Default::default())
