@@ -90,6 +90,7 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
         quote!(max(#acc, <#ty as #base_path::ShaderType>::ALIGN))
     });
 
+    // total size of the struct
     let size = offsets
         .clone()
         .last()
@@ -102,15 +103,22 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
             }
         })
         .expect("must have size");
+    // total alignment of the struct
     let align = quote! {
         #const_fn
         #align
     };
+    // offsets of all fields
     let offsets = offsets.map(|offset| {
         quote! {
             #const_fn
             #offset
         }
+    });
+    // sizes of all fields
+    let sizes = fields.iter().map(|field| {
+        let ty = &field.ty;
+        quote!(<#ty as #base_path::ShaderType>::SIZE)
     });
 
     let members: TokenStream = fields
@@ -124,13 +132,13 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
             let ty = &field.ty;
             let ty = quote!(<#ty as #base_path::ShaderType>::shader_type(types));
             let binding = parse_binding(&field.attrs);
-            // let offset = quote!(::bytemuck::offset_of!(#struct_name, #field_name) as u32);
+            let offset = quote!({ #offset } as u32);
             quote! {
                 members.push(::naga::StructMember {
                     name: #name,
                     ty: #ty,
                     binding: #binding,
-                    offset: { #offset } as u32,
+                    offset: #offset,
                 });
             }
         })
@@ -143,13 +151,15 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
             None => quote!(None),
         })
         .zip(offsets)
-        .enumerate()
-        .map(|(index, (name, offset))| {
+        .zip(sizes)
+        .map(|((name, offset), size)| {
+            let offset = quote!({ #offset });
+            let size = quote!({ #size });
             quote! {
                 #base_path::ShaderField {
                     name: #name,
-                    index: #index,
-                    offset: { #offset },
+                    offset: #offset,
+                    size: #size,
                 },
             }
         })

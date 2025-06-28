@@ -1,4 +1,5 @@
 use half::f16;
+use itertools::Itertools;
 use mia_derive::ShaderType;
 use naga::{Handle, Scalar, Type, TypeInner, UniqueArena, VectorSize};
 
@@ -30,8 +31,8 @@ pub trait ShaderScalar: ShaderType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ShaderField {
     pub name: Option<&'static str>,
-    pub index: usize,
     pub offset: usize,
+    pub size: usize,
 }
 
 /// A trait for shader types that have a struct-like memory layout with named fields.
@@ -43,6 +44,12 @@ pub struct ShaderField {
 pub trait ShaderStruct: ShaderType {
     /// Returns the fields of the shader type.
     const FIELDS: &'static [ShaderField];
+
+    fn shader_field(name: &str) -> Option<(usize, &'static ShaderField)> {
+        Self::FIELDS
+            .iter()
+            .find_position(|field| field.name == Some(name))
+    }
 }
 
 macro_rules! impl_shader_type_scalar {
@@ -99,23 +106,23 @@ macro_rules! impl_shader_type_vector {
             const FIELDS: &'static [ShaderField] = &[
                 ShaderField {
                     name: Some("x"),
-                    index: 0,
                     offset: 0,
+                    size: <T as ShaderType>::SIZE,
                 },
                 ShaderField {
                     name: Some("y"),
-                    index: 1,
                     offset: <T as ShaderType>::SIZE,
+                    size: <T as ShaderType>::SIZE,
                 },
                 ShaderField {
                     name: Some("z"),
-                    index: 2,
                     offset: <T as ShaderType>::SIZE * 2,
+                    size: <T as ShaderType>::SIZE,
                 },
                 ShaderField {
                     name: Some("w"),
-                    index: 3,
                     offset: <T as ShaderType>::SIZE * 3,
+                    size: <T as ShaderType>::SIZE,
                 },
             ];
         }
@@ -229,15 +236,9 @@ mod tests {
     use super::{ShaderField, ShaderStruct, ShaderType};
     use half::f16;
 
-    fn check_field<T: ShaderStruct>(index: usize, name: Option<&'static str>, offset: usize) {
-        assert_eq!(
-            T::FIELDS[index],
-            ShaderField {
-                name,
-                index,
-                offset,
-            }
-        );
+    fn check_field<T: ShaderStruct>(index: usize, name: &'static str, offset: usize, size: usize) {
+        let name = Some(name);
+        assert_eq!(T::FIELDS[index], ShaderField { name, offset, size });
     }
 
     /// Checks size and alignment of basic shader types.
@@ -259,15 +260,15 @@ mod tests {
         assert_eq!(<[f32; 4]>::SIZE, 16);
         assert_eq!(<[f32; 4]>::ALIGN, 16);
 
-        check_field::<[f32; 2]>(0, Some("x"), 0);
-        check_field::<[f32; 2]>(1, Some("y"), 4);
-        check_field::<[f32; 3]>(0, Some("x"), 0);
-        check_field::<[f32; 3]>(1, Some("y"), 4);
-        check_field::<[f32; 3]>(2, Some("z"), 8);
-        check_field::<[f32; 4]>(0, Some("x"), 0);
-        check_field::<[f32; 4]>(1, Some("y"), 4);
-        check_field::<[f32; 4]>(2, Some("z"), 8);
-        check_field::<[f32; 4]>(3, Some("w"), 12);
+        check_field::<[f32; 2]>(0, "x", 0, 4);
+        check_field::<[f32; 2]>(1, "y", 4, 4);
+        check_field::<[f32; 3]>(0, "x", 0, 4);
+        check_field::<[f32; 3]>(1, "y", 4, 4);
+        check_field::<[f32; 3]>(2, "z", 8, 4);
+        check_field::<[f32; 4]>(0, "x", 0, 4);
+        check_field::<[f32; 4]>(1, "y", 4, 4);
+        check_field::<[f32; 4]>(2, "z", 8, 4);
+        check_field::<[f32; 4]>(3, "w", 12, 4);
 
         // matrix types
         assert_eq!(<[[f32; 2]; 2]>::SIZE, 16);
@@ -278,17 +279,17 @@ mod tests {
         assert_eq!(<[[f32; 4]; 4]>::ALIGN, 16);
 
         // matrix type offsets
-        check_field::<[[f32; 2]; 2]>(0, Some("x"), 0);
-        check_field::<[[f32; 2]; 2]>(1, Some("y"), 8);
+        check_field::<[[f32; 2]; 2]>(0, "x", 0, 8);
+        check_field::<[[f32; 2]; 2]>(1, "y", 8, 8);
 
-        check_field::<[[f32; 3]; 3]>(0, Some("x"), 0);
-        check_field::<[[f32; 3]; 3]>(1, Some("y"), 16);
-        check_field::<[[f32; 3]; 3]>(2, Some("z"), 32);
+        check_field::<[[f32; 3]; 3]>(0, "x", 0, 16);
+        check_field::<[[f32; 3]; 3]>(1, "y", 16, 16);
+        check_field::<[[f32; 3]; 3]>(2, "z", 32, 16);
 
-        check_field::<[[f32; 4]; 4]>(0, Some("x"), 0);
-        check_field::<[[f32; 4]; 4]>(1, Some("y"), 16);
-        check_field::<[[f32; 4]; 4]>(2, Some("z"), 32);
-        check_field::<[[f32; 4]; 4]>(3, Some("w"), 48);
+        check_field::<[[f32; 4]; 4]>(0, "x", 0, 16);
+        check_field::<[[f32; 4]; 4]>(1, "y", 16, 16);
+        check_field::<[[f32; 4]; 4]>(2, "z", 32, 16);
+        check_field::<[[f32; 4]; 4]>(3, "w", 48, 16);
     }
 
     #[test]
@@ -298,7 +299,7 @@ mod tests {
         #[repr(C)]
         struct Data {
             color: [f32; 4],         // offset: 0, align: 16, size: 16
-            position: [f32; 3],      // offset: 16, align: 16, size: 12
+            position: [f32; 3],      // offset: 16, align: 16, size: 16
             rotation: [[f32; 3]; 3], // offset: 32, align: 16, size: 48
             #[shader(builtin = "index")]
             index: u32, // offset: 80, align: 4, size: 4
@@ -307,10 +308,10 @@ mod tests {
         assert_eq!(Data::ALIGN, 16);
         assert_eq!(Data::SIZE, 96);
 
-        check_field::<Data>(0, Some("color"), 0);
-        check_field::<Data>(1, Some("position"), 16);
-        check_field::<Data>(2, Some("rotation"), 32);
-        check_field::<Data>(3, Some("index"), 80);
+        check_field::<Data>(0, "color", 0, 16);
+        check_field::<Data>(1, "position", 16, 16);
+        check_field::<Data>(2, "rotation", 32, 48);
+        check_field::<Data>(3, "index", 80, 4);
 
         let mut types = naga::UniqueArena::new();
         let ty = Data::shader_type(&mut types);
