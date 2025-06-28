@@ -30,26 +30,6 @@ macro_rules! impl_shader_type_scalar {
                 Scalar::$scalar
             }
         }
-        impl ShaderType for $type {
-            const SIZE: usize = size_of::<Self>();
-            const ALIGN: usize = align_of::<Self>();
-
-            fn shader_type(types: &mut UniqueArena<Type>) -> Handle<Type> {
-                let r#type = Type {
-                    name: None,
-                    inner: TypeInner::Scalar(Scalar::$scalar),
-                };
-                types.insert(r#type, Default::default())
-            }
-
-            fn shader_field_index(_: impl AsRef<str>) -> usize {
-                panic!("scalar type does not have fields")
-            }
-
-            fn shader_field_offset(_: impl AsRef<str>) -> usize {
-                panic!("scalar type does not have fields")
-            }
-        }
     };
 }
 
@@ -61,6 +41,27 @@ impl_shader_type_scalar!(u64, U64);
 impl_shader_type_scalar!(i32, I32);
 impl_shader_type_scalar!(i64, I64);
 impl_shader_type_scalar!(bool, BOOL);
+
+impl<T: ShaderScalar> ShaderType for T {
+    const SIZE: usize = size_of::<Self>();
+    const ALIGN: usize = align_of::<Self>();
+
+    fn shader_type(types: &mut UniqueArena<Type>) -> Handle<Type> {
+        let r#type = Type {
+            name: None,
+            inner: TypeInner::Scalar(T::shader_scalar()),
+        };
+        types.insert(r#type, Default::default())
+    }
+
+    fn shader_field_index(_: impl AsRef<str>) -> usize {
+        panic!("scalar type does not have fields")
+    }
+
+    fn shader_field_offset(_: impl AsRef<str>) -> usize {
+        panic!("scalar type does not have fields")
+    }
+}
 
 macro_rules! impl_shader_type_vector {
     ($len:literal, $size:ident, $align:literal) => {
@@ -79,12 +80,24 @@ macro_rules! impl_shader_type_vector {
                 types.insert(r#type, Default::default())
             }
 
-            fn shader_field_index(_: impl AsRef<str>) -> usize {
-                panic!("vector type does not have fields")
+            fn shader_field_index(field: impl AsRef<str>) -> usize {
+                match field.as_ref() {
+                    "x" => 0,
+                    "y" => 1,
+                    "z" => 2,
+                    "w" => 3,
+                    _ => panic!("invalid field name for vector type"),
+                }
             }
 
-            fn shader_field_offset(_: impl AsRef<str>) -> usize {
-                panic!("vector type does not have fields")
+            fn shader_field_offset(field: impl AsRef<str>) -> usize {
+                match field.as_ref() {
+                    "x" => 0,
+                    "y" => <T as ShaderType>::ALIGN,
+                    "z" => <T as ShaderType>::ALIGN * 2,
+                    "w" => <T as ShaderType>::ALIGN * 3,
+                    _ => panic!("invalid field name for vector type"),
+                }
             }
         }
     };
@@ -153,6 +166,32 @@ impl_shader_type_matrix!(4, 2, Quad, Bi, x, y);
 impl_shader_type_matrix!(4, 3, Quad, Tri, x, y, z);
 impl_shader_type_matrix!(4, 4, Quad, Quad, x, y, z, w);
 
+macro_rules! impl_shader_type_packed {
+    ($type:ty, $inner:ty) => {
+        impl ShaderType for $type {
+            const SIZE: usize = <$inner>::SIZE;
+            const ALIGN: usize = <$inner>::ALIGN;
+
+            fn shader_type(types: &mut UniqueArena<Type>) -> Handle<Type> {
+                <$inner>::shader_type(types)
+            }
+
+            fn shader_field_index(field: impl AsRef<str>) -> usize {
+                <$inner>::shader_field_index(field)
+            }
+
+            fn shader_field_offset(field: impl AsRef<str>) -> usize {
+                <$inner>::shader_field_offset(field)
+            }
+        }
+    };
+}
+
+impl_shader_type_packed!(crate::loom::num::F16x4, [f16; 4]);
+impl_shader_type_packed!(crate::loom::num::F32x4, [f32; 4]);
+impl_shader_type_packed!(crate::loom::num::U4x8, u32);
+impl_shader_type_packed!(crate::loom::num::U8x4, u32);
+
 #[derive(Default, ShaderType)]
 #[shader(crate = "crate")]
 pub struct ShaderLayout {
@@ -192,6 +231,17 @@ mod tests {
         assert_eq!(<[f32; 3] as ShaderType>::ALIGN, 16);
         assert_eq!(<[f32; 4] as ShaderType>::SIZE, 16);
         assert_eq!(<[f32; 4] as ShaderType>::ALIGN, 16);
+
+        // vector type offsets
+        assert_eq!(<[f32; 2] as ShaderType>::shader_field_offset("x"), 0);
+        assert_eq!(<[f32; 2] as ShaderType>::shader_field_offset("y"), 4);
+        assert_eq!(<[f32; 3] as ShaderType>::shader_field_offset("x"), 0);
+        assert_eq!(<[f32; 3] as ShaderType>::shader_field_offset("y"), 4);
+        assert_eq!(<[f32; 3] as ShaderType>::shader_field_offset("z"), 8);
+        assert_eq!(<[f32; 4] as ShaderType>::shader_field_offset("x"), 0);
+        assert_eq!(<[f32; 4] as ShaderType>::shader_field_offset("y"), 4);
+        assert_eq!(<[f32; 4] as ShaderType>::shader_field_offset("z"), 8);
+        assert_eq!(<[f32; 4] as ShaderType>::shader_field_offset("w"), 12);
 
         // matrix types
         assert_eq!(<[[f32; 2]; 2] as ShaderType>::SIZE, 16);
