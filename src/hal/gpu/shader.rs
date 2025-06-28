@@ -13,14 +13,17 @@ pub trait ShaderType {
 
     /// Build the [`Type`] from this type. This adds dependent types to the arena as well.
     fn shader_type(types: &mut UniqueArena<Type>) -> Handle<Type>;
-    /// Returns the index of a field in the shader type.
-    fn shader_field_index(field: impl AsRef<str>) -> usize;
-    /// Returns the offset in bytes of a field in the shader type.
-    fn shader_field_offset(field: impl AsRef<str>) -> usize;
 }
 
 pub trait ShaderScalar {
     fn shader_scalar() -> Scalar;
+}
+
+pub trait ShaderStruct {
+    /// Returns the index of a field in the shader type.
+    fn shader_field_index(field: impl AsRef<str>) -> usize;
+    /// Returns the offset in bytes of a field in the shader type.
+    fn shader_field_offset(field: impl AsRef<str>) -> usize;
 }
 
 macro_rules! impl_shader_type_scalar {
@@ -53,14 +56,6 @@ impl<T: ShaderScalar> ShaderType for T {
         };
         types.insert(r#type, Default::default())
     }
-
-    fn shader_field_index(_: impl AsRef<str>) -> usize {
-        panic!("scalar type does not have fields")
-    }
-
-    fn shader_field_offset(_: impl AsRef<str>) -> usize {
-        panic!("scalar type does not have fields")
-    }
 }
 
 macro_rules! impl_shader_type_vector {
@@ -79,7 +74,9 @@ macro_rules! impl_shader_type_vector {
                 };
                 types.insert(r#type, Default::default())
             }
+        }
 
+        impl<T: ShaderScalar> ShaderStruct for [T; $len] {
             fn shader_field_index(field: impl AsRef<str>) -> usize {
                 match field.as_ref() {
                     "x" => 0,
@@ -126,7 +123,9 @@ macro_rules! impl_shader_type_matrix {
                 };
                 types.insert(r#type, Default::default())
             }
+        }
 
+        impl<T: ShaderScalar> ShaderStruct for [[T; $m]; $n] {
             fn shader_field_index(field: impl AsRef<str>) -> usize {
                 #[derive(Default, ShaderType)]
                 #[shader(crate = "crate", bound = "U: ShaderScalar")]
@@ -168,14 +167,6 @@ macro_rules! impl_shader_type_packed {
 
             fn shader_type(types: &mut UniqueArena<Type>) -> Handle<Type> {
                 <$inner>::shader_type(types)
-            }
-
-            fn shader_field_index(field: impl AsRef<str>) -> usize {
-                <$inner>::shader_field_index(field)
-            }
-
-            fn shader_field_offset(field: impl AsRef<str>) -> usize {
-                <$inner>::shader_field_offset(field)
             }
         }
     };
@@ -225,59 +216,59 @@ impl From<super::LayoutBundle> for ShaderLayoutBundle {
 
 #[cfg(test)]
 mod tests {
-    use super::ShaderType;
+    use super::{ShaderStruct, ShaderType};
     use half::f16;
 
     /// Checks size and alignment of basic shader types.
     #[test]
     fn test_builtin_shader_type() {
         // scalar types
-        assert_eq!(<f16 as ShaderType>::SIZE, 2);
-        assert_eq!(<f16 as ShaderType>::ALIGN, 2);
-        assert_eq!(<f32 as ShaderType>::SIZE, 4);
-        assert_eq!(<f32 as ShaderType>::ALIGN, 4);
-        assert_eq!(<f64 as ShaderType>::SIZE, 8);
-        assert_eq!(<f64 as ShaderType>::ALIGN, 8);
+        assert_eq!(<f16>::SIZE, 2);
+        assert_eq!(<f16>::ALIGN, 2);
+        assert_eq!(<f32>::SIZE, 4);
+        assert_eq!(<f32>::ALIGN, 4);
+        assert_eq!(<f64>::SIZE, 8);
+        assert_eq!(<f64>::ALIGN, 8);
 
         // vector types
-        assert_eq!(<[f32; 2] as ShaderType>::SIZE, 8);
-        assert_eq!(<[f32; 2] as ShaderType>::ALIGN, 8);
-        assert_eq!(<[f32; 3] as ShaderType>::SIZE, 12);
-        assert_eq!(<[f32; 3] as ShaderType>::ALIGN, 16);
-        assert_eq!(<[f32; 4] as ShaderType>::SIZE, 16);
-        assert_eq!(<[f32; 4] as ShaderType>::ALIGN, 16);
+        assert_eq!(<[f32; 2]>::SIZE, 8);
+        assert_eq!(<[f32; 2]>::ALIGN, 8);
+        assert_eq!(<[f32; 3]>::SIZE, 12);
+        assert_eq!(<[f32; 3]>::ALIGN, 16);
+        assert_eq!(<[f32; 4]>::SIZE, 16);
+        assert_eq!(<[f32; 4]>::ALIGN, 16);
 
         // vector type offsets
-        assert_eq!(<[f32; 2] as ShaderType>::shader_field_offset("x"), 0);
-        assert_eq!(<[f32; 2] as ShaderType>::shader_field_offset("y"), 4);
-        assert_eq!(<[f32; 3] as ShaderType>::shader_field_offset("x"), 0);
-        assert_eq!(<[f32; 3] as ShaderType>::shader_field_offset("y"), 4);
-        assert_eq!(<[f32; 3] as ShaderType>::shader_field_offset("z"), 8);
-        assert_eq!(<[f32; 4] as ShaderType>::shader_field_offset("x"), 0);
-        assert_eq!(<[f32; 4] as ShaderType>::shader_field_offset("y"), 4);
-        assert_eq!(<[f32; 4] as ShaderType>::shader_field_offset("z"), 8);
-        assert_eq!(<[f32; 4] as ShaderType>::shader_field_offset("w"), 12);
+        assert_eq!(<[f32; 2]>::shader_field_offset("x"), 0);
+        assert_eq!(<[f32; 2]>::shader_field_offset("y"), 4);
+        assert_eq!(<[f32; 3]>::shader_field_offset("x"), 0);
+        assert_eq!(<[f32; 3]>::shader_field_offset("y"), 4);
+        assert_eq!(<[f32; 3]>::shader_field_offset("z"), 8);
+        assert_eq!(<[f32; 4]>::shader_field_offset("x"), 0);
+        assert_eq!(<[f32; 4]>::shader_field_offset("y"), 4);
+        assert_eq!(<[f32; 4]>::shader_field_offset("z"), 8);
+        assert_eq!(<[f32; 4]>::shader_field_offset("w"), 12);
 
         // matrix types
-        assert_eq!(<[[f32; 2]; 2] as ShaderType>::SIZE, 16);
-        assert_eq!(<[[f32; 2]; 2] as ShaderType>::ALIGN, 8);
-        assert_eq!(<[[f32; 3]; 3] as ShaderType>::SIZE, 48);
-        assert_eq!(<[[f32; 3]; 3] as ShaderType>::ALIGN, 16);
-        assert_eq!(<[[f32; 4]; 4] as ShaderType>::SIZE, 64);
-        assert_eq!(<[[f32; 4]; 4] as ShaderType>::ALIGN, 16);
+        assert_eq!(<[[f32; 2]; 2]>::SIZE, 16);
+        assert_eq!(<[[f32; 2]; 2]>::ALIGN, 8);
+        assert_eq!(<[[f32; 3]; 3]>::SIZE, 48);
+        assert_eq!(<[[f32; 3]; 3]>::ALIGN, 16);
+        assert_eq!(<[[f32; 4]; 4]>::SIZE, 64);
+        assert_eq!(<[[f32; 4]; 4]>::ALIGN, 16);
 
         // matrix type offsets
-        assert_eq!(<[[f32; 2]; 2] as ShaderType>::shader_field_offset("x"), 0);
-        assert_eq!(<[[f32; 2]; 2] as ShaderType>::shader_field_offset("y"), 8);
+        assert_eq!(<[[f32; 2]; 2]>::shader_field_offset("x"), 0);
+        assert_eq!(<[[f32; 2]; 2]>::shader_field_offset("y"), 8);
 
-        assert_eq!(<[[f32; 3]; 3] as ShaderType>::shader_field_offset("x"), 0);
-        assert_eq!(<[[f32; 3]; 3] as ShaderType>::shader_field_offset("y"), 16);
-        assert_eq!(<[[f32; 3]; 3] as ShaderType>::shader_field_offset("z"), 32);
+        assert_eq!(<[[f32; 3]; 3]>::shader_field_offset("x"), 0);
+        assert_eq!(<[[f32; 3]; 3]>::shader_field_offset("y"), 16);
+        assert_eq!(<[[f32; 3]; 3]>::shader_field_offset("z"), 32);
 
-        assert_eq!(<[[f32; 4]; 4] as ShaderType>::shader_field_offset("x"), 0);
-        assert_eq!(<[[f32; 4]; 4] as ShaderType>::shader_field_offset("y"), 16);
-        assert_eq!(<[[f32; 4]; 4] as ShaderType>::shader_field_offset("z"), 32);
-        assert_eq!(<[[f32; 4]; 4] as ShaderType>::shader_field_offset("w"), 48);
+        assert_eq!(<[[f32; 4]; 4]>::shader_field_offset("x"), 0);
+        assert_eq!(<[[f32; 4]; 4]>::shader_field_offset("y"), 16);
+        assert_eq!(<[[f32; 4]; 4]>::shader_field_offset("z"), 32);
+        assert_eq!(<[[f32; 4]; 4]>::shader_field_offset("w"), 48);
     }
 
     #[test]

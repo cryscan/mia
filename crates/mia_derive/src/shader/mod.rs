@@ -167,7 +167,9 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
                 let r#type = ::naga::Type { name, inner };
                 types.insert(r#type, Default::default())
             }
+        }
 
+        impl #impl_generics #base_path::ShaderStruct for #struct_name #ty_generics #where_clause {
             fn shader_field_index(field: impl AsRef<str>) -> usize {
                 match field.as_ref() {
                     #field_indices
