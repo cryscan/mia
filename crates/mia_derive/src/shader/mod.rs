@@ -136,18 +136,23 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
         })
         .collect();
 
-    let field_indices: TokenStream = fields
+    let fields: TokenStream = fields
         .iter()
-        .flat_map(|field| field.ident.clone())
+        .map(|field| match &field.ident {
+            Some(name) => quote!(Some(stringify!(#name))),
+            None => quote!(None),
+        })
+        .zip(offsets)
         .enumerate()
-        .map(|(index, ident)| quote!(stringify!(#ident) => { #index },))
-        .collect();
-
-    let field_offsets: TokenStream = fields
-        .iter()
-        .zip(offsets.clone())
-        .flat_map(|(field, offset)| field.ident.clone().map(|ident| (ident, offset)))
-        .map(|(ident, offset)| quote!(stringify!(#ident) => { #offset },))
+        .map(|(index, (name, offset))| {
+            quote! {
+                #base_path::ShaderField {
+                    name: #name,
+                    index: #index,
+                    offset: { #offset },
+                },
+            }
+        })
         .collect();
 
     quote! {
@@ -170,19 +175,9 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
         }
 
         impl #impl_generics #base_path::ShaderStruct for #struct_name #ty_generics #where_clause {
-            fn shader_field_index(field: impl AsRef<str>) -> usize {
-                match field.as_ref() {
-                    #field_indices
-                    _ => panic!("unknown field"),
-                }
-            }
-
-            fn shader_field_offset(field: impl AsRef<str>) -> usize {
-                match field.as_ref() {
-                    #field_offsets
-                    _ => panic!("unknown field"),
-                }
-            }
+            const FIELDS: &'static [#base_path::ShaderField] = &[
+                #fields
+            ];
         }
     }
 }

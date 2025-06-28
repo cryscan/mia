@@ -3,7 +3,8 @@ use mia_derive::ShaderType;
 use naga::{Handle, Scalar, Type, TypeInner, UniqueArena, VectorSize};
 
 /// A GPU shader type.
-/// A GPU shader type doesn't necessarily have the same layout as the corresponding Rust type.
+///
+/// Note that it doesn't necessarily have the same layout as the corresponding Rust type.
 /// For example, `[u32; 3]` in rust is aligned to 12 bytes, but in shader it's 16 bytes.
 pub trait ShaderType {
     /// The size of the shader type in bytes.
@@ -15,15 +16,33 @@ pub trait ShaderType {
     fn shader_type(types: &mut UniqueArena<Type>) -> Handle<Type>;
 }
 
-pub trait ShaderScalar {
+/// A trait for types that can be used as scalar values in shaders.
+///
+/// This trait is implemented for primitive numeric types that can be directly used in shaders,
+/// such as `f16`, `f32`, `f64`, `u32`, `u64`, `i32`, `i64`, and `bool`.
+///
+/// Types implementing this trait must also implement [`ShaderType`].
+pub trait ShaderScalar: ShaderType {
+    /// Returns the shader scalar type information.
     fn shader_scalar() -> Scalar;
 }
 
-pub trait ShaderStruct {
-    /// Returns the index of a field in the shader type.
-    fn shader_field_index(field: impl AsRef<str>) -> usize;
-    /// Returns the offset in bytes of a field in the shader type.
-    fn shader_field_offset(field: impl AsRef<str>) -> usize;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ShaderField {
+    pub name: Option<&'static str>,
+    pub index: usize,
+    pub offset: usize,
+}
+
+/// A trait for shader types that have a struct-like memory layout with named fields.
+///
+/// This trait provides methods to query the memory layout of fields within the type when used in shaders.
+/// It is implemented for vectors, matrices, and user-defined structs that are used in shaders.
+///
+/// Types implementing this trait must also implement [`ShaderType`].
+pub trait ShaderStruct: ShaderType {
+    /// Returns the fields of the shader type.
+    const FIELDS: &'static [ShaderField];
 }
 
 macro_rules! impl_shader_type_scalar {
@@ -61,7 +80,7 @@ impl<T: ShaderScalar> ShaderType for T {
 macro_rules! impl_shader_type_vector {
     ($len:literal, $size:ident, $align:literal) => {
         impl<T: ShaderScalar> ShaderType for [T; $len] {
-            const SIZE: usize = size_of::<Self>();
+            const SIZE: usize = size_of::<Self>().div_ceil(Self::ALIGN) * Self::ALIGN;
             const ALIGN: usize = $align * align_of::<T>();
 
             fn shader_type(types: &mut UniqueArena<Type>) -> Handle<Type> {
@@ -77,19 +96,28 @@ macro_rules! impl_shader_type_vector {
         }
 
         impl<T: ShaderScalar> ShaderStruct for [T; $len] {
-            fn shader_field_index(field: impl AsRef<str>) -> usize {
-                match field.as_ref() {
-                    "x" => 0,
-                    "y" => 1,
-                    "z" => 2,
-                    "w" => 3,
-                    _ => panic!("invalid field name for vector type"),
-                }
-            }
-
-            fn shader_field_offset(field: impl AsRef<str>) -> usize {
-                <T as ShaderType>::SIZE * Self::shader_field_index(field)
-            }
+            const FIELDS: &'static [ShaderField] = &[
+                ShaderField {
+                    name: Some("x"),
+                    index: 0,
+                    offset: 0,
+                },
+                ShaderField {
+                    name: Some("y"),
+                    index: 1,
+                    offset: <T as ShaderType>::SIZE,
+                },
+                ShaderField {
+                    name: Some("z"),
+                    index: 2,
+                    offset: <T as ShaderType>::SIZE * 2,
+                },
+                ShaderField {
+                    name: Some("w"),
+                    index: 3,
+                    offset: <T as ShaderType>::SIZE * 3,
+                },
+            ];
         }
     };
 }
@@ -101,15 +129,7 @@ impl_shader_type_vector!(4, Quad, 4);
 macro_rules! impl_shader_type_matrix {
     ($m:literal, $n:literal, $vm:ident, $vn:ident, $($fields:ident),*) => {
         impl<T: ShaderScalar> ShaderType for [[T; $m]; $n] {
-            const SIZE: usize = {
-                #[derive(Default, ShaderType)]
-                #[shader(crate = "crate", bound = "U: ShaderScalar")]
-                #[allow(unused)]
-                struct Inner<U> {
-                    $($fields: [U; $m]),*
-                }
-                Inner::<T>::SIZE
-            };
+            const SIZE: usize = $n * <[T; $n] as ShaderType>::SIZE;
             const ALIGN: usize = <[T; $m] as ShaderType>::ALIGN;
 
             fn shader_type(types: &mut UniqueArena<Type>) -> Handle<Type> {
@@ -126,25 +146,15 @@ macro_rules! impl_shader_type_matrix {
         }
 
         impl<T: ShaderScalar> ShaderStruct for [[T; $m]; $n] {
-            fn shader_field_index(field: impl AsRef<str>) -> usize {
+            const FIELDS: &'static [ShaderField] = {
                 #[derive(Default, ShaderType)]
                 #[shader(crate = "crate", bound = "U: ShaderScalar")]
                 #[allow(unused)]
                 struct Inner<U> {
                     $($fields: [U; $m]),*
                 }
-                Inner::<T>::shader_field_index(field)
-            }
-
-            fn shader_field_offset(field: impl AsRef<str>) -> usize {
-                #[derive(Default, ShaderType)]
-                #[shader(crate = "crate", bound = "U: ShaderScalar")]
-                #[allow(unused)]
-                struct Inner<U> {
-                    $($fields: [U; $m]),*
-                }
-                Inner::<T>::shader_field_offset(field)
-            }
+                Inner::<T>::FIELDS
+            };
         }
     };
 }
@@ -216,8 +226,19 @@ impl From<super::LayoutBundle> for ShaderLayoutBundle {
 
 #[cfg(test)]
 mod tests {
-    use super::{ShaderStruct, ShaderType};
+    use super::{ShaderField, ShaderStruct, ShaderType};
     use half::f16;
+
+    fn check_field<T: ShaderStruct>(index: usize, name: Option<&'static str>, offset: usize) {
+        assert_eq!(
+            T::FIELDS[index],
+            ShaderField {
+                name,
+                index,
+                offset,
+            }
+        );
+    }
 
     /// Checks size and alignment of basic shader types.
     #[test]
@@ -233,21 +254,20 @@ mod tests {
         // vector types
         assert_eq!(<[f32; 2]>::SIZE, 8);
         assert_eq!(<[f32; 2]>::ALIGN, 8);
-        assert_eq!(<[f32; 3]>::SIZE, 12);
+        assert_eq!(<[f32; 3]>::SIZE, 16);
         assert_eq!(<[f32; 3]>::ALIGN, 16);
         assert_eq!(<[f32; 4]>::SIZE, 16);
         assert_eq!(<[f32; 4]>::ALIGN, 16);
 
-        // vector type offsets
-        assert_eq!(<[f32; 2]>::shader_field_offset("x"), 0);
-        assert_eq!(<[f32; 2]>::shader_field_offset("y"), 4);
-        assert_eq!(<[f32; 3]>::shader_field_offset("x"), 0);
-        assert_eq!(<[f32; 3]>::shader_field_offset("y"), 4);
-        assert_eq!(<[f32; 3]>::shader_field_offset("z"), 8);
-        assert_eq!(<[f32; 4]>::shader_field_offset("x"), 0);
-        assert_eq!(<[f32; 4]>::shader_field_offset("y"), 4);
-        assert_eq!(<[f32; 4]>::shader_field_offset("z"), 8);
-        assert_eq!(<[f32; 4]>::shader_field_offset("w"), 12);
+        check_field::<[f32; 2]>(0, Some("x"), 0);
+        check_field::<[f32; 2]>(1, Some("y"), 4);
+        check_field::<[f32; 3]>(0, Some("x"), 0);
+        check_field::<[f32; 3]>(1, Some("y"), 4);
+        check_field::<[f32; 3]>(2, Some("z"), 8);
+        check_field::<[f32; 4]>(0, Some("x"), 0);
+        check_field::<[f32; 4]>(1, Some("y"), 4);
+        check_field::<[f32; 4]>(2, Some("z"), 8);
+        check_field::<[f32; 4]>(3, Some("w"), 12);
 
         // matrix types
         assert_eq!(<[[f32; 2]; 2]>::SIZE, 16);
@@ -258,22 +278,22 @@ mod tests {
         assert_eq!(<[[f32; 4]; 4]>::ALIGN, 16);
 
         // matrix type offsets
-        assert_eq!(<[[f32; 2]; 2]>::shader_field_offset("x"), 0);
-        assert_eq!(<[[f32; 2]; 2]>::shader_field_offset("y"), 8);
+        check_field::<[[f32; 2]; 2]>(0, Some("x"), 0);
+        check_field::<[[f32; 2]; 2]>(1, Some("y"), 8);
 
-        assert_eq!(<[[f32; 3]; 3]>::shader_field_offset("x"), 0);
-        assert_eq!(<[[f32; 3]; 3]>::shader_field_offset("y"), 16);
-        assert_eq!(<[[f32; 3]; 3]>::shader_field_offset("z"), 32);
+        check_field::<[[f32; 3]; 3]>(0, Some("x"), 0);
+        check_field::<[[f32; 3]; 3]>(1, Some("y"), 16);
+        check_field::<[[f32; 3]; 3]>(2, Some("z"), 32);
 
-        assert_eq!(<[[f32; 4]; 4]>::shader_field_offset("x"), 0);
-        assert_eq!(<[[f32; 4]; 4]>::shader_field_offset("y"), 16);
-        assert_eq!(<[[f32; 4]; 4]>::shader_field_offset("z"), 32);
-        assert_eq!(<[[f32; 4]; 4]>::shader_field_offset("w"), 48);
+        check_field::<[[f32; 4]; 4]>(0, Some("x"), 0);
+        check_field::<[[f32; 4]; 4]>(1, Some("y"), 16);
+        check_field::<[[f32; 4]; 4]>(2, Some("z"), 32);
+        check_field::<[[f32; 4]; 4]>(3, Some("w"), 48);
     }
 
     #[test]
     fn test_derive_shader_type() {
-        #[derive(Debug, Default, ShaderType)]
+        #[derive(Debug, Default, Clone, ShaderType)]
         #[shader(crate = "crate")]
         #[repr(C)]
         struct Data {
@@ -287,15 +307,10 @@ mod tests {
         assert_eq!(Data::ALIGN, 16);
         assert_eq!(Data::SIZE, 96);
 
-        assert_eq!(Data::shader_field_index("color"), 0);
-        assert_eq!(Data::shader_field_index("position"), 1);
-        assert_eq!(Data::shader_field_index("rotation"), 2);
-        assert_eq!(Data::shader_field_index("index"), 3);
-
-        assert_eq!(Data::shader_field_offset("color"), 0);
-        assert_eq!(Data::shader_field_offset("position"), 16);
-        assert_eq!(Data::shader_field_offset("rotation"), 32);
-        assert_eq!(Data::shader_field_offset("index"), 80);
+        check_field::<Data>(0, Some("color"), 0);
+        check_field::<Data>(1, Some("position"), 16);
+        check_field::<Data>(2, Some("rotation"), 32);
+        check_field::<Data>(3, Some("index"), 80);
 
         let mut types = naga::UniqueArena::new();
         let ty = Data::shader_type(&mut types);
