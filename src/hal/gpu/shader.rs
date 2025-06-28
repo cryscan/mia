@@ -91,13 +91,7 @@ macro_rules! impl_shader_type_vector {
             }
 
             fn shader_field_offset(field: impl AsRef<str>) -> usize {
-                match field.as_ref() {
-                    "x" => 0,
-                    "y" => <T as ShaderType>::ALIGN,
-                    "z" => <T as ShaderType>::ALIGN * 2,
-                    "w" => <T as ShaderType>::ALIGN * 3,
-                    _ => panic!("invalid field name for vector type"),
-                }
+                <T as ShaderType>::SIZE * Self::shader_field_index(field)
             }
         }
     };
@@ -192,7 +186,7 @@ impl_shader_type_packed!(crate::loom::num::F32x4, [f32; 4]);
 impl_shader_type_packed!(crate::loom::num::U4x8, u32);
 impl_shader_type_packed!(crate::loom::num::U8x4, u32);
 
-#[derive(Default, ShaderType)]
+#[derive(Debug, Default, Clone, ShaderType)]
 #[shader(crate = "crate")]
 pub struct ShaderLayout {
     pub shape: [u32; 4],
@@ -205,6 +199,27 @@ impl From<crate::loom::layout::Layout> for ShaderLayout {
         let shape = value.shape().to_array().map(|x| x as u32);
         let stride = value.stride().to_array().map(|x| x as u32);
         Self { shape, stride }
+    }
+}
+
+#[derive(Debug, Default, Clone, ShaderType)]
+#[shader(crate = "crate")]
+pub struct ShaderLayoutBundle {
+    pub block: ShaderLayout,
+    pub thread: ShaderLayout,
+    pub custom: ShaderLayout,
+}
+
+impl From<super::LayoutBundle> for ShaderLayoutBundle {
+    fn from(value: super::LayoutBundle) -> Self {
+        let block = value.block.into();
+        let thread = value.thread.into();
+        let custom = value.custom.into();
+        Self {
+            block,
+            thread,
+            custom,
+        }
     }
 }
 
