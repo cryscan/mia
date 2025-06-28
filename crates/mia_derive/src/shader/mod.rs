@@ -63,57 +63,62 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
         }
     };
 
-    let offsets = fields.iter().scan(quote!(0usize), |offset, field| {
+    let const_fn = quote! {
+        const fn round_to(offset: usize, align: usize) -> usize { offset.div_ceil(align) * align }
+        const fn max(a: usize, b: usize) -> usize { [a, b][(a < b) as usize] }
+    };
+
+    let offsets = fields.iter().scan(vec![], |sizes, field| {
         let ty = &field.ty;
         let size = quote!(<#ty as #base_path::ShaderType>::SIZE);
         let align = quote!(<#ty as #base_path::ShaderType>::ALIGN);
-        let output = quote! {
-            let offset = { #offset };
-            let size = #size;
-            let align = #align;
-            offset.div_ceil(align) * align
-        };
-        let next = quote! {
-            let offset = { #output };
-            let size = #size;
-            offset + size
-        };
-        *offset = next.clone();
-        Some((output, next))
-    });
+        sizes.push(quote!(round_to(#size, #align)));
 
-    let size = offsets
-        .clone()
-        .map(|(_, x)| x)
-        .last()
-        .expect("must have size");
+        let offset = sizes
+            .iter()
+            .fold(quote!(0usize), |acc, x| quote!(#acc + #x));
+        Some(quote! {
+            let offset = #offset;
+            let align = #align;
+            round_to(offset, align)
+        })
+    });
+    let offsets = [quote!(0usize)].into_iter().chain(offsets);
+
     let align = fields.iter().fold(quote!(1usize), |acc, field| {
         let ty = &field.ty;
         quote!(max(#acc, <#ty as #base_path::ShaderType>::ALIGN))
     });
 
-    // define the max function
+    let size = offsets
+        .clone()
+        .last()
+        .map(|size| {
+            quote! {
+                #const_fn
+                let size = { #size };
+                let align = <Self as #base_path::ShaderType>::ALIGN;
+                round_to(size, align)
+            }
+        })
+        .expect("must have size");
     let align = quote! {
-        const fn max(a: usize, b: usize) -> usize { [a, b][(a < b) as usize] }
+        #const_fn
         #align
     };
-    // round up size to multiples of align
-    let size = quote! {
-        let size = { #size };
-        let align = { #align };
-        size.div_ceil(align) * align
-    };
+    let offsets = offsets.map(|offset| {
+        quote! {
+            #const_fn
+            #offset
+        }
+    });
 
     let members: TokenStream = fields
         .iter()
         .zip(offsets.clone())
-        .map(|(field, (offset, _))| {
-            let field_name = &field.ident;
-            let name = match field_name {
-                Some(ident) => {
-                    let name = ident.to_string();
-                    quote!(Some(#name.to_string()))
-                }
+        .map(|(field, offset)| {
+            let name = match &field.ident {
+                Some(ident) => quote!(Some(stringify!(#ident).into())),
                 None => quote!(None),
             };
             let ty = &field.ty;
@@ -131,30 +136,27 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
         })
         .collect();
 
+    let field_indices: TokenStream = fields
+        .iter()
+        .flat_map(|field| field.ident.clone())
+        .enumerate()
+        .map(|(index, ident)| quote!(stringify!(#ident) => { #index },))
+        .collect();
+
     let field_offsets: TokenStream = fields
         .iter()
         .zip(offsets.clone())
-        .enumerate()
-        .map(|(index, (field, (offset, _)))| {
-            let name = field
-                .ident
-                .clone()
-                .map(|ident| ident.to_string())
-                .unwrap_or_else(|| format!(".{index}"));
-            quote! {
-                #name => { #offset },
-            }
-        })
+        .flat_map(|(field, offset)| field.ident.clone().map(|ident| (ident, offset)))
+        .map(|(ident, offset)| quote!(stringify!(#ident) => { #offset },))
         .collect();
 
-    let name = struct_name.to_string();
     quote! {
         impl #impl_generics #base_path::ShaderType for #struct_name #ty_generics #where_clause {
             const SIZE: usize = { #size };
             const ALIGN: usize = { #align };
 
             fn shader_type(types: &mut ::naga::UniqueArena<::naga::Type>) -> ::naga::Handle<::naga::Type> {
-                let name = Some(#name.to_string());
+                let name = Some(stringify!(#struct_name).into());
                 let members = {
                     let mut members = Vec::new();
                     #members;
@@ -166,9 +168,15 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
                 types.insert(r#type, Default::default())
             }
 
+            fn shader_field_index(field: impl AsRef<str>) -> usize {
+                match field.as_ref() {
+                    #field_indices
+                    _ => panic!("unknown field"),
+                }
+            }
+
             fn shader_field_offset(field: impl AsRef<str>) -> usize {
-                let field = field.as_ref();
-                match field {
+                match field.as_ref() {
                     #field_offsets
                     _ => panic!("unknown field"),
                 }

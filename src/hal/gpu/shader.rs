@@ -13,7 +13,9 @@ pub trait ShaderType {
 
     /// Build the [`Type`] from this type. This adds dependent types to the arena as well.
     fn shader_type(types: &mut UniqueArena<Type>) -> Handle<Type>;
-    /// Returns the offset of a field in the shader type.
+    /// Returns the index of a field in the shader type.
+    fn shader_field_index(field: impl AsRef<str>) -> usize;
+    /// Returns the offset in bytes of a field in the shader type.
     fn shader_field_offset(field: impl AsRef<str>) -> usize;
 }
 
@@ -40,8 +42,12 @@ macro_rules! impl_shader_type_scalar {
                 types.insert(r#type, Default::default())
             }
 
+            fn shader_field_index(_: impl AsRef<str>) -> usize {
+                panic!("scalar type does not have fields")
+            }
+
             fn shader_field_offset(_: impl AsRef<str>) -> usize {
-                0
+                panic!("scalar type does not have fields")
             }
         }
     };
@@ -73,8 +79,12 @@ macro_rules! impl_shader_type_vector {
                 types.insert(r#type, Default::default())
             }
 
+            fn shader_field_index(_: impl AsRef<str>) -> usize {
+                panic!("vector type does not have fields")
+            }
+
             fn shader_field_offset(_: impl AsRef<str>) -> usize {
-                0
+                panic!("vector type does not have fields")
             }
         }
     };
@@ -108,6 +118,16 @@ macro_rules! impl_shader_type_matrix {
                     },
                 };
                 types.insert(r#type, Default::default())
+            }
+
+            fn shader_field_index(field: impl AsRef<str>) -> usize {
+                #[derive(Default, ShaderType)]
+                #[shader(crate = "crate", bound = "U: ShaderScalar")]
+                #[allow(unused)]
+                struct Inner<U> {
+                    $($fields: [U; $m]),*
+                }
+                Inner::<T>::shader_field_index(field)
             }
 
             fn shader_field_offset(field: impl AsRef<str>) -> usize {
@@ -152,7 +172,6 @@ impl From<crate::loom::layout::Layout> for ShaderLayout {
 #[cfg(test)]
 mod tests {
     use super::ShaderType;
-
     use half::f16;
 
     /// Checks size and alignment of basic shader types.
@@ -211,6 +230,12 @@ mod tests {
 
         assert_eq!(Data::ALIGN, 16);
         assert_eq!(Data::SIZE, 96);
+
+        assert_eq!(Data::shader_field_index("color"), 0);
+        assert_eq!(Data::shader_field_index("position"), 1);
+        assert_eq!(Data::shader_field_index("rotation"), 2);
+        assert_eq!(Data::shader_field_index("index"), 3);
+
         assert_eq!(Data::shader_field_offset("color"), 0);
         assert_eq!(Data::shader_field_offset("position"), 16);
         assert_eq!(Data::shader_field_offset("rotation"), 32);
