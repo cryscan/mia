@@ -12,9 +12,13 @@ use wide::f32x4;
 pub enum DataType {
     F16,
     F32,
+    F64,
     U8,
     U16,
     U32,
+    U64,
+    I32,
+    I64,
     U4x8,
     U8x4,
     F16x4,
@@ -27,9 +31,13 @@ impl DataType {
         match self {
             DataType::F16 => 1,
             DataType::F32 => 1,
+            DataType::F64 => 1,
             DataType::U8 => 1,
             DataType::U16 => 1,
             DataType::U32 => 1,
+            DataType::U64 => 1,
+            DataType::I32 => 1,
+            DataType::I64 => 1,
             DataType::U4x8 => 8,
             DataType::U8x4 => 4,
             DataType::F16x4 => 4,
@@ -40,11 +48,15 @@ impl DataType {
     /// Element Size in bytes.
     pub const fn size(self) -> usize {
         match self {
-            DataType::F32 => size_of::<f32>(),
             DataType::F16 => size_of::<f16>(),
+            DataType::F32 => size_of::<f32>(),
+            DataType::F64 => size_of::<f64>(),
             DataType::U8 => size_of::<u8>(),
             DataType::U16 => size_of::<u16>(),
             DataType::U32 => size_of::<u32>(),
+            DataType::U64 => size_of::<u64>(),
+            DataType::I32 => size_of::<i32>(),
+            DataType::I64 => size_of::<i64>(),
             DataType::U4x8 => size_of::<U4x8>(),
             DataType::U8x4 => size_of::<U8x4>(),
             DataType::F16x4 => size_of::<F16x4>(),
@@ -332,6 +344,12 @@ impl Zero for f32 {
     }
 }
 
+impl Zero for f64 {
+    fn zero() -> Self {
+        0.0
+    }
+}
+
 impl Zero for u8 {
     fn zero() -> Self {
         0
@@ -345,6 +363,24 @@ impl Zero for u16 {
 }
 
 impl Zero for u32 {
+    fn zero() -> Self {
+        0
+    }
+}
+
+impl Zero for u64 {
+    fn zero() -> Self {
+        0
+    }
+}
+
+impl Zero for i32 {
+    fn zero() -> Self {
+        0
+    }
+}
+
+impl Zero for i64 {
     fn zero() -> Self {
         0
     }
@@ -390,6 +426,12 @@ impl One for f32 {
     }
 }
 
+impl One for f64 {
+    fn one() -> Self {
+        1.0
+    }
+}
+
 impl One for u8 {
     fn one() -> Self {
         1
@@ -403,6 +445,24 @@ impl One for u16 {
 }
 
 impl One for u32 {
+    fn one() -> Self {
+        1
+    }
+}
+
+impl One for u64 {
+    fn one() -> Self {
+        1
+    }
+}
+
+impl One for i32 {
+    fn one() -> Self {
+        1
+    }
+}
+
+impl One for i64 {
     fn one() -> Self {
         1
     }
@@ -450,6 +510,10 @@ impl Scalar for f32 {
     const DATA_TYPE: DataType = DataType::F32;
 }
 
+impl Scalar for f64 {
+    const DATA_TYPE: DataType = DataType::F64;
+}
+
 impl Scalar for u8 {
     const DATA_TYPE: DataType = DataType::U8;
 }
@@ -460,6 +524,18 @@ impl Scalar for u16 {
 
 impl Scalar for u32 {
     const DATA_TYPE: DataType = DataType::U32;
+}
+
+impl Scalar for u64 {
+    const DATA_TYPE: DataType = DataType::U64;
+}
+
+impl Scalar for i32 {
+    const DATA_TYPE: DataType = DataType::I32;
+}
+
+impl Scalar for i64 {
+    const DATA_TYPE: DataType = DataType::I64;
 }
 
 impl Scalar for U4x8 {

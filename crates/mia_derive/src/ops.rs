@@ -5,14 +5,17 @@ use syn::{
     spanned::Spanned,
 };
 
+macro_rules! bail {
+    ($span:expr, $message:expr) => {
+        return syn::Error::new($span, $message).to_compile_error()
+    };
+}
+
 pub fn derive_tensor_op(input: DeriveInput) -> TokenStream {
     // retrieve struct field information
     let fields = match &input.data {
         syn::Data::Struct(data_struct) => &data_struct.fields,
-        _ => {
-            return syn::Error::new(input.span(), "`TensorOp` can only be derived for structs")
-                .to_compile_error();
-        }
+        _ => bail!(input.span(), "`TensorOp` can only be derived for structs"),
     };
 
     // determine the field access expression for trait forwarding
@@ -20,11 +23,8 @@ pub fn derive_tensor_op(input: DeriveInput) -> TokenStream {
         // tuple struct: must have exactly one field
         Fields::Unnamed(fields_unnamed) => {
             if fields_unnamed.unnamed.len() != 1 {
-                return syn::Error::new(
-                    fields_unnamed.span(),
-                    "tuple structs must have exactly one field",
-                )
-                .to_compile_error();
+                let message = "tuple structs must have exactly one field";
+                bail!(fields_unnamed.span(), message);
             }
             // access the single tuple field
             quote! { self.0 }
@@ -40,11 +40,11 @@ pub fn derive_tensor_op(input: DeriveInput) -> TokenStream {
 
             // ensure exactly one marked field exists
             if marked_fields.len() != 1 {
-                let msg = match marked_fields.len() {
+                let message = match marked_fields.len() {
                     0 => "no field marked with #[tensor_op] attribute",
                     _ => "multiple fields marked with #[tensor_op] attribute",
                 };
-                return syn::Error::new(fields_named.span(), msg).to_compile_error();
+                bail!(fields_named.span(), message);
             }
 
             // identifier of the marked field
@@ -53,11 +53,8 @@ pub fn derive_tensor_op(input: DeriveInput) -> TokenStream {
         }
         // unit structs are not supported
         Fields::Unit => {
-            return syn::Error::new(
-                input.span(),
-                "unit structs are not supported by `TensorOp` derive",
-            )
-            .to_compile_error();
+            let message = "unit structs are not supported by `TensorOp` derive";
+            bail!(input.span(), message);
         }
     };
 

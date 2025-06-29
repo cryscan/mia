@@ -5,6 +5,12 @@ use syn::{
     spanned::Spanned,
 };
 
+macro_rules! bail {
+    ($span:expr, $message:expr) => {
+        return syn::Error::new($span, $message).to_compile_error()
+    };
+}
+
 pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
     // parse shader_type attributes
     let mut crate_name = None;
@@ -57,10 +63,7 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
     // retrieve struct field information
     let fields = match &input.data {
         syn::Data::Struct(data_struct) => &data_struct.fields,
-        _ => {
-            return syn::Error::new(input.span(), "`ShaderType` can only be derived for structs")
-                .to_compile_error();
-        }
+        _ => bail!(input.span(), "`ShaderType` can only be derived for structs"),
     };
 
     let const_fn = quote! {
@@ -68,58 +71,41 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
         const fn max(a: usize, b: usize) -> usize { [a, b][(a < b) as usize] }
     };
 
-    let offsets = fields.iter().scan(vec![], |sizes, field| {
-        let ty = &field.ty;
-        let size = quote!(<#ty as #base_path::ShaderType>::SIZE);
-        let align = quote!(<#ty as #base_path::ShaderType>::ALIGN);
-        sizes.push(quote!(round_to(#size, #align)));
+    let offsets = fields
+        .iter()
+        .map(|field| &field.ty)
+        .scan(quote!(0usize), |state, ty| {
+            let size = quote!(<#ty as #base_path::ShaderType>::SIZE);
+            let align = quote!(<#ty as #base_path::ShaderType>::ALIGN);
+            let offset = quote!(#state);
+            *state = quote!(round_to(#offset + #size, #align));
+            Some(offset)
+        });
 
-        let offset = sizes
-            .iter()
-            .fold(quote!(0usize), |acc, x| quote!(#acc + #x));
-        Some(quote! {
-            let offset = #offset;
-            let align = #align;
-            round_to(offset, align)
-        })
-    });
-    let offsets = [quote!(0usize)].into_iter().chain(offsets);
-
-    let align = fields.iter().fold(quote!(1usize), |acc, field| {
-        let ty = &field.ty;
-        quote!(max(#acc, <#ty as #base_path::ShaderType>::ALIGN))
-    });
+    // sizes of all fields
+    let sizes = fields
+        .iter()
+        .map(|field| &field.ty)
+        .map(|ty| quote!(<#ty as #base_path::ShaderType>::SIZE));
 
     // total size of the struct
     let size = offsets
         .clone()
         .last()
-        .map(|size| {
-            quote! {
-                #const_fn
-                let size = { #size };
-                let align = <Self as #base_path::ShaderType>::ALIGN;
-                round_to(size, align)
-            }
-        })
-        .expect("must have size");
+        .zip(sizes.clone().last())
+        .map(|(offset, size)| quote!(round_to(#offset + #size, <Self as #base_path::ShaderType>::ALIGN)))
+        .map(|size| quote!(#const_fn #size))
+        .unwrap_or(quote!(0usize));
+
     // total alignment of the struct
-    let align = quote! {
-        #const_fn
-        #align
-    };
+    let align = fields.iter().map(|field| &field.ty).fold(
+        quote!(1usize),
+        |acc, ty| quote!(max(#acc, <#ty as #base_path::ShaderType>::ALIGN)),
+    );
+    let align = quote!(#const_fn #align);
+
     // offsets of all fields
-    let offsets = offsets.map(|offset| {
-        quote! {
-            #const_fn
-            #offset
-        }
-    });
-    // sizes of all fields
-    let sizes = fields.iter().map(|field| {
-        let ty = &field.ty;
-        quote!(<#ty as #base_path::ShaderType>::SIZE)
-    });
+    let offsets = offsets.map(|offset| quote!(#const_fn #offset));
 
     let members: TokenStream = fields
         .iter()
@@ -134,17 +120,17 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
             let binding = parse_binding(&field.attrs);
             let offset = quote!({ #offset } as u32);
             quote! {
-                members.push(::naga::StructMember {
+                ::naga::StructMember {
                     name: #name,
                     ty: #ty,
                     binding: #binding,
                     offset: #offset,
-                });
+                },
             }
         })
         .collect();
 
-    let fields: TokenStream = fields
+    let field_info: TokenStream = fields
         .iter()
         .map(|field| match &field.ident {
             Some(name) => quote!(Some(stringify!(#name))),
@@ -165,6 +151,28 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
         })
         .collect();
 
+    // field access code for shader_bytes implementation
+    let field_bytes: TokenStream = fields
+        .iter()
+        .enumerate()
+        .map(|(index, field)| {
+            let field_name = match &field.ident {
+                Some(ident) => quote!(#ident),
+                None => {
+                    let index = syn::Index::from(index);
+                    quote!(#index)
+                }
+            };
+            quote! {
+                let field_data = self.#field_name.shader_bytes();
+                let field_info = &Self::FIELDS[#index];
+                let start = field_info.offset;
+                let end = start + field_info.size;
+                data[start..end].copy_from_slice(&field_data[..]);
+            }
+        })
+        .collect();
+
     quote! {
         impl #impl_generics #base_path::ShaderType for #struct_name #ty_generics #where_clause {
             const SIZE: usize = { #size };
@@ -172,21 +180,23 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
 
             fn shader_type(types: &mut ::naga::UniqueArena<::naga::Type>) -> ::naga::Handle<::naga::Type> {
                 let name = Some(stringify!(#struct_name).into());
-                let members = {
-                    let mut members = Vec::new();
-                    #members;
-                    members
-                };
+                let members = vec![#members];
                 let span = { #size } as u32;
                 let inner = ::naga::TypeInner::Struct { members, span };
                 let r#type = ::naga::Type { name, inner };
                 types.insert(r#type, Default::default())
             }
+
+            fn shader_bytes(&self) -> Box<[u8]> {
+                let mut data = vec![0u8; Self::SIZE];
+                #field_bytes
+                data.into_boxed_slice()
+            }
         }
 
         impl #impl_generics #base_path::ShaderStruct for #struct_name #ty_generics #where_clause {
             const FIELDS: &'static [#base_path::ShaderField] = &[
-                #fields
+                #field_info
             ];
         }
     }
