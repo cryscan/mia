@@ -195,9 +195,7 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
         }
 
         impl #impl_generics #base_path::ShaderStruct for #struct_name #ty_generics #where_clause {
-            const FIELDS: &'static [#base_path::ShaderField] = &[
-                #field_info
-            ];
+            const FIELDS: &'static [#base_path::ShaderField] = &[#field_info];
         }
     }
 }

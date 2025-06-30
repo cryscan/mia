@@ -157,8 +157,8 @@ macro_rules! impl_shader_type_matrix {
                 for (index, field) in Self::FIELDS.iter().enumerate() {
                     let field_data = self[index].shader_bytes();
                     let start = field.offset;
-                    let end = start + std::cmp::min(field_data.len(), field.size);
-                    data[start..end].copy_from_slice(&field_data[..end - start]);
+                    let end = start + field.size;
+                    data[start..end].copy_from_slice(&field_data[..]);
                 }
                 data.into_boxed_slice()
             }

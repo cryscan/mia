@@ -1,8 +1,9 @@
 use proc_macro::TokenStream;
-use syn::{DeriveInput, LitInt, parse_macro_input};
+use syn::{DeriveInput, ItemFn, LitInt, parse_macro_input};
 
 mod api;
 mod ops;
+mod rumia;
 mod shader;
 
 #[proc_macro_derive(TensorOp, attributes(tensor_op))]
@@ -20,8 +21,16 @@ pub fn build_api(input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_derive(ShaderType, attributes(shader))]
-pub fn shader_type(input: TokenStream) -> TokenStream {
+pub fn derive_shader_type(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let expanded = shader::derive_shader_type(input);
+    expanded.into()
+}
+
+#[proc_macro_attribute]
+pub fn rumia(attr: TokenStream, input: TokenStream) -> TokenStream {
+    let attr = parse_macro_input!(attr as proc_macro2::TokenStream);
+    let input = parse_macro_input!(input as ItemFn);
+    let expanded = rumia::rumia(attr, input);
     expanded.into()
 }
