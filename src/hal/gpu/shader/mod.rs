@@ -3,6 +3,8 @@ use itertools::Itertools;
 use mia_derive::ShaderType;
 use naga::{Handle, Scalar, Type, TypeInner, UniqueArena, VectorSize};
 
+pub mod ast;
+
 /// A GPU shader type.
 ///
 /// Note that it doesn't necessarily have the same layout as the corresponding Rust type.
