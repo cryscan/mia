@@ -1,7 +1,8 @@
-use naga::{Arena, Handle, Scalar, VectorSize};
+use naga::{Handle, Scalar, UniqueArena, VectorSize};
 
+#[derive(Debug, Default)]
 pub struct Module {
-    pub types: Arena<Type>,
+    pub types: UniqueArena<Type>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -9,7 +10,7 @@ pub struct Ident {
     pub name: &'static str,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum Type {
     Scalar(Scalar),
     Vector(Vector),
@@ -18,34 +19,36 @@ pub enum Type {
     Struct(Struct),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Vector {
-    pub r#type: Handle<Type>,
+    pub scalar: Scalar,
     pub size: VectorSize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+
 pub struct Matrix {
-    pub r#type: Handle<Type>,
+    pub scalar: Scalar,
     pub rows: VectorSize,
     pub columns: VectorSize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ArraySize {
+    #[default]
     Dynamic,
     Constant(std::num::NonZeroU32),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Array {
     pub r#type: Handle<Type>,
     pub size: ArraySize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StructField {
-    pub name: Ident,
+    pub name: Option<Ident>,
     pub r#type: Handle<Type>,
     pub offset: u32,
 }
@@ -56,7 +59,21 @@ pub struct Struct {
     pub fields: Vec<StructField>,
 }
 
-#[derive(Debug)]
+impl PartialEq for Struct {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+impl Eq for Struct {}
+
+impl std::hash::Hash for Struct {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeAlias {
     pub name: Ident,
     pub r#type: Handle<Type>,

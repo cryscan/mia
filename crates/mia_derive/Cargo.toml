@@ -18,6 +18,7 @@ quote = "1"
 syn = { version = "2", features = ["extra-traits", "full"] }
 
 half = "2.2"
+itertools = "0.14"
 naga = "25.0"
 rustc-hash = "2.1"
 

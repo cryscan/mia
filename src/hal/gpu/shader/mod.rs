@@ -1,7 +1,6 @@
 use half::f16;
-use itertools::Itertools;
 use mia_derive::ShaderType;
-use naga::{Handle, Scalar, Type, TypeInner, UniqueArena, VectorSize};
+use naga::{Handle, Scalar, VectorSize};
 
 pub mod ast;
 
@@ -15,8 +14,8 @@ pub trait ShaderType {
     /// The alignment of the shader type in bytes.
     const ALIGN: usize;
 
-    /// Build the [`Type`] from this type. This adds dependent types to the arena as well.
-    fn shader_type(types: &mut UniqueArena<Type>) -> Handle<Type>;
+    /// Build the [`Type`](ast::Type) from this type. This adds dependent types to the arena as well.
+    fn shader_type(module: &mut ast::Module) -> Handle<ast::Type>;
     /// Convert `self` to bytes in shader.
     fn shader_bytes(&self) -> Box<[u8]>;
 }
@@ -35,6 +34,7 @@ pub trait ShaderScalar: ShaderType + crate::loom::num::Scalar {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ShaderField {
     pub name: Option<&'static str>,
+    pub index: usize,
     pub offset: usize,
     pub size: usize,
 }
@@ -49,10 +49,11 @@ pub trait ShaderStruct: ShaderType {
     /// Returns the fields of the shader type.
     const FIELDS: &'static [ShaderField];
 
-    fn shader_field(name: &str) -> Option<(usize, &'static ShaderField)> {
-        Self::FIELDS
-            .iter()
-            .find_position(|field| field.name == Some(name))
+    fn shader_field(key: &str) -> Option<&'static ShaderField> {
+        match key.parse::<usize>() {
+            Ok(index) => Self::FIELDS.get(index),
+            Err(_) => Self::FIELDS.iter().find(|field| field.name == Some(key)),
+        }
     }
 }
 
@@ -79,12 +80,9 @@ impl<T: ShaderScalar> ShaderType for T {
     const SIZE: usize = size_of::<Self>();
     const ALIGN: usize = align_of::<Self>();
 
-    fn shader_type(types: &mut UniqueArena<Type>) -> Handle<Type> {
-        let r#type = Type {
-            name: None,
-            inner: TypeInner::Scalar(T::shader_scalar()),
-        };
-        types.insert(r#type, Default::default())
+    fn shader_type(module: &mut ast::Module) -> Handle<ast::Type> {
+        let r#type = ast::Type::Scalar(T::shader_scalar());
+        module.types.insert(r#type, Default::default())
     }
 
     fn shader_bytes(&self) -> Box<[u8]> {
@@ -100,15 +98,12 @@ macro_rules! impl_shader_type_vector {
             const SIZE: usize = size_of::<Self>().div_ceil(Self::ALIGN) * Self::ALIGN;
             const ALIGN: usize = $align * align_of::<T>();
 
-            fn shader_type(types: &mut UniqueArena<Type>) -> Handle<Type> {
-                let r#type = Type {
-                    name: None,
-                    inner: TypeInner::Vector {
-                        size: VectorSize::$size,
-                        scalar: T::shader_scalar(),
-                    },
-                };
-                types.insert(r#type, Default::default())
+            fn shader_type(module: &mut ast::Module) -> Handle<ast::Type> {
+                let r#type = ast::Type::Vector(ast::Vector {
+                    scalar: T::shader_scalar(),
+                    size: VectorSize::$size,
+                });
+                module.types.insert(r#type, Default::default())
             }
 
             fn shader_bytes(&self) -> Box<[u8]> {
@@ -142,16 +137,13 @@ macro_rules! impl_shader_type_matrix {
             const SIZE: usize = $n * <[T; $n] as ShaderType>::SIZE;
             const ALIGN: usize = <[T; $m] as ShaderType>::ALIGN;
 
-            fn shader_type(types: &mut UniqueArena<Type>) -> Handle<Type> {
-                let r#type = Type {
-                    name: None,
-                    inner: TypeInner::Matrix {
-                        columns: VectorSize::$vn,
-                        rows: VectorSize::$vm,
-                        scalar: T::shader_scalar(),
-                    },
-                };
-                types.insert(r#type, Default::default())
+            fn shader_type(module: &mut ast::Module) -> Handle<ast::Type> {
+                let r#type = ast::Type::Matrix(ast::Matrix {
+                    scalar: T::shader_scalar(),
+                    columns: VectorSize::$vn,
+                    rows: VectorSize::$vm,
+                });
+                module.types.insert(r#type, Default::default())
             }
 
             fn shader_bytes(&self) -> Box<[u8]> {
@@ -196,8 +188,8 @@ macro_rules! impl_shader_type_packed {
             const SIZE: usize = <$inner>::SIZE;
             const ALIGN: usize = <$inner>::ALIGN;
 
-            fn shader_type(types: &mut UniqueArena<Type>) -> Handle<Type> {
-                <$inner>::shader_type(types)
+            fn shader_type(module: &mut ast::Module) -> Handle<ast::Type> {
+                <$inner>::shader_type(module)
             }
 
             fn shader_bytes(&self) -> Box<[u8]> {
@@ -258,7 +250,15 @@ mod tests {
 
     fn check_field<T: ShaderStruct>(index: usize, name: &'static str, offset: usize, size: usize) {
         let name = Some(name);
-        assert_eq!(T::FIELDS[index], ShaderField { name, offset, size });
+        assert_eq!(
+            T::FIELDS[index],
+            ShaderField {
+                name,
+                index,
+                offset,
+                size
+            }
+        );
     }
 
     fn field_span<T: ShaderStruct>(index: usize) -> std::ops::Range<usize> {
@@ -338,12 +338,12 @@ mod tests {
         check_field::<Data>(2, "rotation", 32, 48);
         check_field::<Data>(3, "index", 80, 4);
 
-        let mut types = naga::UniqueArena::new();
-        let ty = Data::shader_type(&mut types);
-        let ty = types.get_handle(ty).expect("failed to find type");
+        let mut module = super::ast::Module::default();
+        let ty = Data::shader_type(&mut module);
+        let ty = &module.types[ty];
 
         println!("{ty:#?}");
-        assert_eq!(types.len(), 5);
+        assert_eq!(module.types.len(), 5);
     }
 
     #[test]

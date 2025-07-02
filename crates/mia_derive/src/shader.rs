@@ -111,39 +111,39 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
         .iter()
         .zip(offsets.clone())
         .map(|(field, offset)| {
-            let name = match &field.ident {
-                Some(ident) => quote!(Some(stringify!(#ident).into())),
-                None => quote!(None),
-            };
+            let name = field
+                .ident
+                .as_ref()
+                .map(|ident| quote!(Some(stringify!(#ident))))
+                .map(|name| quote!(#name.map(|name| #base_path::ast::Ident { name })))
+                .unwrap_or(quote!(None));
             let ty = &field.ty;
-            let ty = quote!(<#ty as #base_path::ShaderType>::shader_type(types));
-            let binding = parse_binding(&field.attrs);
+            let ty = quote!(<#ty as #base_path::ShaderType>::shader_type(module));
+            let _binding = parse_binding(&field.attrs);
             let offset = quote!({ #offset } as u32);
             quote! {
-                ::naga::StructMember {
+                #base_path::ast::StructField {
                     name: #name,
-                    ty: #ty,
-                    binding: #binding,
+                    r#type: #ty,
                     offset: #offset,
                 },
             }
         })
         .collect();
 
-    let field_info: TokenStream = fields
-        .iter()
-        .map(|field| match &field.ident {
-            Some(name) => quote!(Some(stringify!(#name))),
-            None => quote!(None),
-        })
-        .zip(offsets)
-        .zip(sizes)
-        .map(|((name, offset), size)| {
+    let field_info: TokenStream = itertools::izip!(fields.iter(), offsets, sizes,)
+        .enumerate()
+        .map(|(index, (field, offset, size))| {
+            let name = match &field.ident {
+                Some(ident) => quote!(Some(stringify!(#ident))),
+                None => quote!(None),
+            };
             let offset = quote!({ #offset });
             let size = quote!({ #size });
             quote! {
                 #base_path::ShaderField {
                     name: #name,
+                    index: #index,
                     offset: #offset,
                     size: #size,
                 },
@@ -156,12 +156,10 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
         .iter()
         .enumerate()
         .map(|(index, field)| {
+            let index = syn::Index::from(index);
             let field_name = match &field.ident {
                 Some(ident) => quote!(#ident),
-                None => {
-                    let index = syn::Index::from(index);
-                    quote!(#index)
-                }
+                None => quote!(#index),
             };
             quote! {
                 let field_data = self.#field_name.shader_bytes();
@@ -178,13 +176,11 @@ pub fn derive_shader_type(input: DeriveInput) -> TokenStream {
             const SIZE: usize = { #size };
             const ALIGN: usize = { #align };
 
-            fn shader_type(types: &mut ::naga::UniqueArena<::naga::Type>) -> ::naga::Handle<::naga::Type> {
-                let name = Some(stringify!(#struct_name).into());
-                let members = vec![#members];
-                let span = { #size } as u32;
-                let inner = ::naga::TypeInner::Struct { members, span };
-                let r#type = ::naga::Type { name, inner };
-                types.insert(r#type, Default::default())
+            fn shader_type(module: &mut #base_path::ast::Module) -> ::naga::Handle<#base_path::ast::Type> {
+                let name = #base_path::ast::Ident { name: stringify!(#struct_name) };
+                let fields = vec![#members];
+                let r#type = #base_path::ast::Type::Struct(#base_path::ast::Struct { name, fields });
+                module.types.insert(r#type, Default::default())
             }
 
             fn shader_bytes(&self) -> Box<[u8]> {
