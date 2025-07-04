@@ -1,4 +1,4 @@
-use naga::{Handle, Scalar, UniqueArena, VectorSize};
+use naga::{Handle, Literal, Scalar, UniqueArena, VectorSize};
 
 #[derive(Debug, Default)]
 pub struct Module {
@@ -19,14 +19,13 @@ pub enum Type {
     Struct(Struct),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Vector {
     pub scalar: Scalar,
     pub size: VectorSize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Matrix {
     pub scalar: Scalar,
     pub rows: VectorSize,
@@ -40,13 +39,13 @@ pub enum ArraySize {
     Constant(std::num::NonZeroU32),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Array {
     pub r#type: Handle<Type>,
     pub size: ArraySize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct StructField {
     pub name: Option<Ident>,
     pub r#type: Handle<Type>,
@@ -73,8 +72,62 @@ impl std::hash::Hash for Struct {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct TypeAlias {
     pub name: Ident,
     pub r#type: Handle<Type>,
+}
+
+#[derive(Debug)]
+pub struct Block {
+    pub stmts: Vec<Statement>,
+}
+
+#[derive(Debug)]
+pub enum Statement {
+    LocalItem(LocalItem),
+    Expression(Handle<Expression>),
+}
+
+#[derive(Debug)]
+pub enum LocalItem {
+    Let(Let),
+    Var(Var),
+}
+
+#[derive(Debug)]
+pub struct Local;
+
+#[derive(Debug)]
+pub struct Let {
+    pub name: Ident,
+    pub r#type: Handle<Type>,
+    pub init: Handle<Expression>,
+    pub local: Handle<Local>,
+}
+
+#[derive(Debug)]
+pub struct Var {
+    pub name: Ident,
+    pub r#type: Handle<Type>,
+    pub init: Handle<Expression>,
+    pub local: Handle<Local>,
+}
+
+#[derive(Debug)]
+pub enum Expression {
+    Literal(Literal),
+    Operator(Operator),
+    If(If),
+    Underscore,
+}
+
+#[derive(Debug)]
+pub enum Operator {}
+
+#[derive(Debug)]
+pub struct If {
+    pub condition: Handle<Expression>,
+    pub accept: Block,
+    pub reject: Block,
 }
