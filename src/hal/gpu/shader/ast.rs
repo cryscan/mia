@@ -1,4 +1,4 @@
-use naga::{Handle, Literal, Scalar, UniqueArena, VectorSize};
+use naga::{BinaryOperator, Handle, Literal, Scalar, UnaryOperator, UniqueArena, VectorSize};
 
 #[derive(Debug, Default)]
 pub struct Module {
@@ -117,17 +117,47 @@ pub struct Var {
 #[derive(Debug)]
 pub enum Expression {
     Literal(Literal),
+    Block(Block),
     Operator(Operator),
     If(If),
+    Return(Return),
     Underscore,
 }
 
 #[derive(Debug)]
-pub enum Operator {}
+pub enum Operator {
+    Assign(Assign),
+    Unary(Unary),
+    Binary(Binary),
+}
+
+#[derive(Debug)]
+pub struct Assign {
+    pub place: Handle<Expression>,
+    pub value: Handle<Expression>,
+}
+
+#[derive(Debug)]
+pub struct Unary {
+    pub op: UnaryOperator,
+    pub operand: Handle<Expression>,
+}
+
+#[derive(Debug)]
+pub struct Binary {
+    pub op: BinaryOperator,
+    pub lhs: Handle<Expression>,
+    pub rhs: Handle<Expression>,
+}
 
 #[derive(Debug)]
 pub struct If {
     pub condition: Handle<Expression>,
     pub accept: Block,
     pub reject: Block,
+}
+
+#[derive(Debug)]
+pub struct Return {
+    pub value: Option<Handle<Expression>>,
 }
