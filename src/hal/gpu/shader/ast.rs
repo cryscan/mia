@@ -87,6 +87,9 @@ pub struct Block {
 pub enum Statement {
     LocalItem(LocalItem),
     Expression(Handle<Expression>),
+    Block(Block),
+    If(If),
+    Return(Return),
 }
 
 #[derive(Debug)]
@@ -115,13 +118,25 @@ pub struct Var {
 }
 
 #[derive(Debug)]
+pub struct If {
+    pub condition: Handle<Expression>,
+    pub accept: Block,
+    pub reject: Block,
+}
+
+#[derive(Debug)]
+pub struct Return {
+    pub value: Option<Handle<Expression>>,
+}
+
+#[derive(Debug)]
 pub enum Expression {
     Literal(Literal),
-    Block(Block),
+    Ident(Ident),
     Operator(Operator),
-    If(If),
-    Return(Return),
-    Underscore,
+    Call(Call),
+    Index(Index),
+    Access(Access),
 }
 
 #[derive(Debug)]
@@ -140,7 +155,7 @@ pub struct Assign {
 #[derive(Debug)]
 pub struct Unary {
     pub op: UnaryOperator,
-    pub operand: Handle<Expression>,
+    pub expr: Handle<Expression>,
 }
 
 #[derive(Debug)]
@@ -151,13 +166,19 @@ pub struct Binary {
 }
 
 #[derive(Debug)]
-pub struct If {
-    pub condition: Handle<Expression>,
-    pub accept: Block,
-    pub reject: Block,
+pub struct Call {
+    pub function: Ident,
+    pub inputs: Vec<Handle<Expression>>,
 }
 
 #[derive(Debug)]
-pub struct Return {
-    pub value: Option<Handle<Expression>>,
+pub struct Index {
+    pub base: Handle<Expression>,
+    pub index: Handle<Expression>,
+}
+
+#[derive(Debug)]
+pub struct Access {
+    pub base: Handle<Expression>,
+    pub field: Ident,
 }
