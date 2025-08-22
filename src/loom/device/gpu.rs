@@ -116,7 +116,7 @@ impl super::Backend for Backend {
 
 impl Backend {
     #[inline]
-    pub fn allocator(&self) -> RefMut<Allocator> {
+    pub fn allocator(&self) -> RefMut<'_, Allocator> {
         self.allocator.borrow_mut()
     }
 }
