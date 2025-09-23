@@ -141,7 +141,7 @@ impl Shape {
         // find the division index
         let Some((i, &(p, n))) = product.iter().enumerate().find(|&(i, &(p, n))| {
             // 1. `p = N0 × N1 × ... × N(i-1)` divides d
-            if d % p != 0 {
+            if !d.is_multiple_of(p) {
                 return false;
             }
             // 2. if `i < α`, let `c = d / p`, we need `1 ≤ c < N(i)`, and `c` divides `N(i)`
@@ -194,7 +194,7 @@ impl Shape {
         // find the division index
         let Some((i, &(p, _))) = product.iter().enumerate().find(|&(i, &(p, n))| {
             // 1. `p = N0 × N1 × ... × N(i-1)` divides d
-            if d % p != 0 {
+            if !d.is_multiple_of(p) {
                 return false;
             }
             // 2. if `i < α`, let `c = d / p`, we need `1 ≤ c < N(i)`
