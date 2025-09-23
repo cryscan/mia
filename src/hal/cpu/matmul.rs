@@ -22,7 +22,7 @@ impl BackendOp<Backend> for MatMatFp16Op<f16> {
 
         let a = backend.fetch(io[0].id);
         let b = backend.fetch(io[1].id);
-        let c = backend.create(io[2].id, LayoutBuffer::<_, f16>::new(&_c));
+        let c = backend.fetch_or_alloc::<f16>(io[2].id, _c.co_size());
 
         #[cfg(not(feature = "rayon"))]
         handle(move || {
@@ -105,7 +105,7 @@ impl BackendOp<Backend> for MatMatFp16Op<f32> {
 
         let a = backend.fetch(io[0].id);
         let b = backend.fetch(io[1].id);
-        let c = backend.create(io[2].id, LayoutBuffer::<_, f32>::new(&_c));
+        let c = backend.fetch_or_alloc::<f32>(io[2].id, _c.co_size());
 
         #[cfg(not(feature = "rayon"))]
         handle(move || {
