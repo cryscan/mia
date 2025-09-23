@@ -105,12 +105,9 @@ impl super::Backend for Backend {
     }
 
     #[inline]
-    fn fetch(&self, id: TensorId) -> Self::Data {
+    fn try_fetch(&self, id: TensorId) -> Option<Self::Data> {
         let id = self.allocator().retrieve(id);
-        self.buffers
-            .get(&id)
-            .expect("failed to fetch buffer")
-            .clone()
+        self.buffers.get(&id).cloned()
     }
 }
 

@@ -70,8 +70,27 @@ pub trait Backend {
         C: Into<Cow<'a, [T]>>;
     /// Allocate a buffer for tensor of `id`.
     fn alloc<T: Scalar>(&mut self, id: TensorId, len: usize) -> Self::Data;
+
+    /// Try to get the buffer of tensor of `id`.
+    fn try_fetch(&self, id: TensorId) -> Option<Self::Data>;
     /// Get the buffer of tensor of `id`.
-    fn fetch(&self, id: TensorId) -> Self::Data;
+    ///
+    /// # Panics
+    /// The method panics if the buffer is not found.
+    fn fetch(&self, id: TensorId) -> Self::Data {
+        match self.try_fetch(id) {
+            Some(data) => data,
+            None => panic!("failed to fetch buffer {id}"),
+        }
+    }
+
+    /// Fetch or allocate a buffer for tensor of `id`.
+    fn fetch_or_alloc<T: Scalar>(&mut self, id: TensorId, len: usize) -> Self::Data {
+        match self.try_fetch(id) {
+            Some(data) => data,
+            None => self.alloc::<T>(id, len),
+        }
+    }
 }
 
 type OpFn<B> = for<'a> fn(&'a mut B, &'a dyn TensorOp, Vec<TensorIr>) -> BoxFuture<'a, ()>;
