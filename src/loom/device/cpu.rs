@@ -405,13 +405,13 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         .filter(|op| !commit.contains(&op.id()))
                         .cloned()
                         .collect_vec();
+                    commit.extend(ops.iter().map(|op| op.id()));
+
                     for op in ops {
                         let op = backend.allocator().alloc(op)?;
-                        let io = op.io();
-                        let id = op.id();
-                        backend.execute(&op, io).await;
-                        commit.insert(id);
+                        backend.execute(&op, op.io()).await;
                     }
+
                     let data = tape.mermaid_alloc(backend.allocator());
                     Ok(ExecuteData(data))
                 }
@@ -422,18 +422,18 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                 let data = async {
                     let ops = tape
                         .ops
-                        .into_iter()
+                        .iter()
                         .filter(|op| !commit.contains(&op.id()))
+                        .cloned()
                         .collect_vec();
+                    commit.extend(ops.iter().map(|op| op.id()));
+
                     for op in ops {
                         let op = backend.allocator().alloc(op)?;
-                        let io = op.io();
-                        let id = op.id();
-                        backend.execute(&op, io).await;
-                        commit.insert(id);
+                        backend.execute(&op, op.io()).await;
                     }
-                    let id = tape.id;
-                    Ok(backend.fetch(id))
+
+                    Ok(backend.fetch(tape.id))
                 }
                 .await
                 .map(Buffer::into_inner)
