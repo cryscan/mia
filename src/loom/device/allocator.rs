@@ -143,10 +143,7 @@ impl Allocator {
             let size = ir.borrow().data_size();
 
             self.alloc.retain(|_, &mut x| x != id);
-
-            let mut ids = self.free.remove(&size).unwrap_or_default();
-            ids.push_back(id);
-            self.free.insert(size, ids);
+            self.free.entry(size).or_default().push_back(id);
         }
 
         let io = io.into_iter().map(|ir| ir.into_inner()).collect_vec();

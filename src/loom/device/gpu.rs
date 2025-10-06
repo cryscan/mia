@@ -239,6 +239,14 @@ pub struct Upload {
     pub data: Arc<[u8]>,
 }
 
+/// Encodes GPU compute commands into a command buffer for execution.
+///
+/// # Arguments
+/// * `device` - The WebGPU device used to create the command encoder.
+/// * `kernels` - A slice of `Kernel` structs representing the compute operations to encode.
+///
+/// # Returns
+/// A `wgpu::CommandBuffer` containing the encoded compute commands.
 fn encode(device: &wgpu::Device, kernels: &[Kernel]) -> wgpu::CommandBuffer {
     let mut encoder = device.create_command_encoder(&Default::default());
     for kernel in kernels {
@@ -256,141 +264,143 @@ fn encode(device: &wgpu::Device, kernels: &[Kernel]) -> wgpu::CommandBuffer {
 
 async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
     let mut commit = HashSet::default();
-    let mut uploads = HashMap::default();
-    let mut commands = HashMap::default();
+    let mut uploads = HashMap::<TensorId, Vec<_>>::default();
+    let mut commands = HashMap::<TensorId, Vec<_>>::default();
 
     while let Ok(event) = receiver.recv_async().await {
         match event {
             DeviceEvent::Execute { tape, sender } => {
-                let id = async {
+                let data: Result<_, DeviceError> = async {
                     let ops = tape
                         .ops
                         .iter()
                         .filter(|op| !commit.contains(&op.id()))
                         .cloned()
                         .collect_vec();
+                    commit.extend(ops.iter().map(|op| op.id()));
+
                     for op in ops {
                         let op = backend.allocator().alloc(op)?;
-                        let io = op.io();
-                        let id = op.id();
-                        backend.execute(&op, io).await;
-                        commit.insert(id);
+                        backend.execute(&op, op.io()).await;
                     }
-                    Ok(tape.id)
+
+                    uploads
+                        .entry(tape.id)
+                        .or_default()
+                        .append(&mut backend.uploads);
+
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let command = Arc::new(Mutex::new(None));
+                    #[cfg(target_arch = "wasm32")]
+                    let command = Rc::new(RefCell::new(None));
+
+                    commands.entry(tape.id).or_default().push(command.clone());
+
+                    let data = tape.mermaid_alloc(backend.allocator());
+                    let data = ExecuteData(data);
+
+                    let sender = sender.clone();
+                    let device = backend.device.clone();
+                    let kernels = std::mem::take(&mut backend.kernels);
+                    platform::dispatch(move || {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        command
+                            .lock()
+                            .expect("failed to lock command")
+                            .replace(encode(&device, &kernels));
+                        #[cfg(target_arch = "wasm32")]
+                        command.borrow_mut().replace(encode(&device, &kernels));
+                        _ = sender.send(Ok(data))
+                    });
+
+                    Ok(())
                 }
                 .await;
-                match id {
-                    Ok(id) => {
-                        let mut v = uploads.remove(&id).unwrap_or(Vec::new());
-                        v.append(&mut backend.uploads);
-                        uploads.insert(id, v);
 
-                        #[cfg(not(target_arch = "wasm32"))]
-                        let command = Arc::new(Mutex::new(None));
-                        #[cfg(target_arch = "wasm32")]
-                        let command = Rc::new(RefCell::new(None));
-
-                        let mut v = commands.remove(&id).unwrap_or(Vec::new());
-                        v.push(command.clone());
-                        commands.insert(id, v);
-
-                        let data = tape.mermaid_alloc(backend.allocator());
-                        let data = ExecuteData(data);
-
-                        let device = backend.device.clone();
-                        let kernels = std::mem::take(&mut backend.kernels);
-                        platform::dispatch(move || {
-                            #[cfg(not(target_arch = "wasm32"))]
-                            command
-                                .lock()
-                                .expect("failed to lock command")
-                                .replace(encode(&device, &kernels));
-                            #[cfg(target_arch = "wasm32")]
-                            command.borrow_mut().replace(encode(&device, &kernels));
-                            _ = sender.send(Ok(data))
-                        });
-                    }
-                    Err(err) => _ = sender.send_async(Err(err)).await,
+                if let Err(err) = data {
+                    _ = sender.send_async(Err(err)).await;
                 }
             }
             DeviceEvent::Back { tape, sender } => {
-                let id = async {
+                let data: Result<_, DeviceError> = async {
                     let ops = tape
                         .ops
-                        .into_iter()
+                        .iter()
                         .filter(|op| !commit.contains(&op.id()))
+                        .cloned()
                         .collect_vec();
+                    commit.extend(ops.iter().map(|op| op.id()));
+
                     for op in ops {
                         let op = backend.allocator().alloc(op)?;
-                        let io = op.io();
-                        let id = op.id();
-                        backend.execute(&op, io).await;
-                        commit.insert(id);
+                        backend.execute(&op, op.io()).await;
                     }
-                    Ok(tape.id)
+
+                    let mut uploads = uploads.remove(&tape.id).unwrap_or_default();
+                    uploads.append(&mut backend.uploads);
+                    let uploads = uploads
+                        .into_iter()
+                        .map(|upload| (backend.fetch(upload.id), upload.data))
+                        .collect_vec();
+
+                    let sender = sender.clone();
+                    let commands = commands.remove(&tape.id).unwrap_or_default();
+                    let data = backend.fetch(tape.id);
+                    let device = backend.device.clone();
+                    let queue = backend.queue.clone();
+                    let kernels = std::mem::take(&mut backend.kernels);
+                    platform::dispatch(move || {
+                        // 1. upload data into input buffers
+                        uploads
+                            .into_iter()
+                            .for_each(|(buffer, data)| queue.write_buffer(&buffer, 0, &data));
+
+                        // 2. encode remaining commands
+                        #[cfg(not(target_arch = "wasm32"))]
+                        let mut commands = commands
+                            .into_iter()
+                            .flat_map(|x| x.lock().expect("failed to lock command").take())
+                            .collect_vec();
+                        #[cfg(target_arch = "wasm32")]
+                        let mut commands = commands
+                            .into_iter()
+                            .flat_map(|x| x.borrow_mut().take())
+                            .collect_vec();
+                        commands.push(encode(&device, &kernels));
+
+                        // 3. submit and read back
+                        let back = device.create_buffer(&wgpu::BufferDescriptor {
+                            label: None,
+                            size: data.size(),
+                            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                            mapped_at_creation: false,
+                        });
+                        let mut encoder = device.create_command_encoder(&Default::default());
+                        encoder.copy_buffer_to_buffer(&data, 0, &back, 0, data.size());
+                        commands.push(encoder.finish());
+
+                        let index = queue.submit(commands);
+
+                        back.clone()
+                            .map_async(wgpu::MapMode::Read, .., move |result| {
+                                let data = result
+                                    .map(|_| back.get_mapped_range(..))
+                                    .map(|data| data.to_vec().into_boxed_slice())
+                                    .map(BackData)
+                                    .map_err(DeviceError::from);
+                                _ = sender.send(data)
+                            });
+
+                        // 4. poll and wait
+                        _ = device.poll(wgpu::PollType::WaitForSubmissionIndex(index))
+                    });
+
+                    Ok(())
                 }
                 .await;
-                match id {
-                    Ok(id) => {
-                        let mut uploads = uploads.remove(&id).unwrap_or(Vec::new());
-                        uploads.append(&mut backend.uploads);
-                        let uploads = uploads
-                            .into_iter()
-                            .map(|upload| (backend.fetch(upload.id), upload.data))
-                            .collect_vec();
 
-                        let commands = commands.remove(&id).unwrap_or(Vec::new());
-                        let data = backend.fetch(id);
-                        let device = backend.device.clone();
-                        let queue = backend.queue.clone();
-                        let kernels = std::mem::take(&mut backend.kernels);
-                        platform::dispatch(move || {
-                            // 1. upload data into input buffers
-                            uploads
-                                .into_iter()
-                                .for_each(|(buffer, data)| queue.write_buffer(&buffer, 0, &data));
-
-                            // 2. encode remaining commands
-                            #[cfg(not(target_arch = "wasm32"))]
-                            let mut commands = commands
-                                .into_iter()
-                                .flat_map(|x| x.lock().expect("failed to lock command").take())
-                                .collect_vec();
-                            #[cfg(target_arch = "wasm32")]
-                            let mut commands = commands
-                                .into_iter()
-                                .flat_map(|x| x.borrow_mut().take())
-                                .collect_vec();
-                            commands.push(encode(&device, &kernels));
-
-                            // 3. submit and read back
-                            let back = device.create_buffer(&wgpu::BufferDescriptor {
-                                label: None,
-                                size: data.size(),
-                                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                                mapped_at_creation: false,
-                            });
-                            let mut encoder = device.create_command_encoder(&Default::default());
-                            encoder.copy_buffer_to_buffer(&data, 0, &back, 0, data.size());
-                            commands.push(encoder.finish());
-
-                            let index = queue.submit(commands);
-
-                            back.clone()
-                                .map_async(wgpu::MapMode::Read, .., move |result| {
-                                    let data = result
-                                        .map(|_| back.get_mapped_range(..))
-                                        .map(|data| data.to_vec().into_boxed_slice())
-                                        .map(BackData)
-                                        .map_err(DeviceError::from);
-                                    _ = sender.send(data)
-                                });
-
-                            // 4. poll and wait
-                            _ = device.poll(wgpu::PollType::WaitForSubmissionIndex(index))
-                        });
-                    }
-                    Err(err) => _ = sender.send_async(Err(err)).await,
+                if let Err(err) = data {
+                    _ = sender.send_async(Err(err)).await;
                 }
             }
             DeviceEvent::Cleanup { retain } => {
@@ -420,5 +430,36 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                 commit.retain(|id| ids.contains(id));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use half::f16;
+
+    use super::*;
+    use crate::loom::tensor::Tensor;
+
+    #[tokio::test]
+    async fn test_tensor_create() -> Result<(), Box<dyn std::error::Error>> {
+        let instance = wgpu::Instance::new(&Default::default());
+        let adapter = instance.request_adapter(&Default::default()).await?;
+
+        let gpu = GpuBuilder::new(adapter).add_default_ops().build().await?;
+
+        const C: usize = 1024;
+        const T: usize = 768;
+
+        let data: Arc<[f16]> = (0..C * T).map(|x| f16::from_f32(x as f32)).collect();
+
+        let tensor = Tensor::create(gpu.clone(), [C, T], data.clone())?;
+        let back = tensor.back().await?;
+
+        let r#ref = data.into_iter().copied().collect::<Box<[_]>>();
+        assert_eq!(back, r#ref);
+
+        Ok(())
     }
 }
