@@ -14,6 +14,8 @@ impl CpuBuilder {
     pub fn add_default_ops(self) -> Self {
         self.add_op::<ZeroOp>()
             .add_op::<OneOp>()
+            .add_op::<CreateOp<u8>>()
+            .add_op::<CreateOp<u32>>()
             .add_op::<CreateOp<f32>>()
             .add_op::<CreateOp<f16>>()
             .add_op::<AddOp<f32>>()
@@ -41,6 +43,8 @@ impl GpuBuilder {
     pub fn add_default_ops(self) -> Self {
         self.add_op::<ZeroOp>()
             .add_op::<OneOp>()
+            .add_op::<CreateOp<u8>>()
+            .add_op::<CreateOp<u32>>()
             .add_op::<CreateOp<f32>>()
             .add_op::<CreateOp<f16>>()
     }

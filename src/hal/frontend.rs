@@ -252,7 +252,7 @@ impl<D: Device + Clone> MatrixFp16<D> {
             Layout::from_shape([m, n]),
         ];
 
-        if m % BM == 0 && n % BN == 0 {
+        if m.is_multiple_of(BM) && n.is_multiple_of(BN) {
             let layouts = [
                 layouts[0].div_tiler([(BK, 1), (BM, 1)])?,
                 layouts[1].div_tiler([(BK, 1), (BN, 1)])?,
