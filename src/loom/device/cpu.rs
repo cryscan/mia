@@ -412,7 +412,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         backend.execute(&op, op.io()).await;
                     }
 
-                    let data = tape.mermaid_alloc(backend.allocator());
+                    let data = backend.allocator().mermaid(&tape);
                     Ok(ExecuteData(data))
                 }
                 .await;

@@ -296,7 +296,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                     sender
                 };
 
-                let data = tape.mermaid_alloc(backend.allocator());
+                let data = backend.allocator().mermaid(&tape);
                 let data = ExecuteData(data);
 
                 let device = backend.device.clone();

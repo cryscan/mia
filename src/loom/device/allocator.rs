@@ -186,23 +186,16 @@ impl Allocator {
             })
             .join("\n")
     }
-}
 
-impl std::fmt::Display for Allocator {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.print_pretty())
-    }
-}
-
-impl TensorTape {
-    pub fn mermaid_alloc<A>(&self, mut allocator: A) -> Mermaid
-    where
-        A: std::ops::DerefMut<Target = Allocator>,
-    {
-        let allocator = allocator.deref_mut();
+    /// Generates a Mermaid diagram representation of the tensor operation tape after allocation.
+    ///
+    /// This function creates a visual graph showing the relationships between tensor operations
+    /// and their input/output tensors. The diagram uses Mermaid syntax which can be rendered
+    /// in various documentation tools.
+    pub fn mermaid(&mut self, tape: &TensorTape) -> Mermaid {
         let mut s = "graph TD\n".to_string();
 
-        for (index, op) in self.ops.iter().enumerate() {
+        for (index, op) in tape.ops.iter().enumerate() {
             let op_name = op.name();
             let op_node = format!("op_{index}");
             let op_label = format!("{op_name}");
@@ -210,7 +203,7 @@ impl TensorTape {
 
             for ir in op.io() {
                 let tensor_node = format!("tensor_{}", ir.id);
-                let tensor_label = format!("{}", allocator.retrieve(ir.id));
+                let tensor_label = format!("{}", self.retrieve(ir.id));
 
                 match ir.access {
                     Access::ReadOnly => {
@@ -226,6 +219,12 @@ impl TensorTape {
             }
         }
         Mermaid(s)
+    }
+}
+
+impl std::fmt::Display for Allocator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.print_pretty())
     }
 }
 
