@@ -173,6 +173,7 @@ impl GpuBuilder {
                 required_limits: limits,
                 memory_hints: wgpu::MemoryHints::Performance,
                 trace: wgpu::Trace::Off,
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
             })
             .await?;
 
@@ -375,7 +376,10 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                         });
 
                     // 4. poll and wait
-                    _ = device.poll(wgpu::PollType::WaitForSubmissionIndex(index))
+                    _ = device.poll(wgpu::PollType::Wait {
+                        submission_index: Some(index),
+                        timeout: None,
+                    })
                 });
             }
             DeviceEvent::Cleanup { retain } => {
