@@ -1,4 +1,4 @@
-use std::{any::TypeId, borrow::Cow};
+use std::{any::TypeId, borrow::Cow, sync::Arc};
 
 use derive_more::{Deref, DerefMut, Display};
 use rustc_hash::FxHashMap as HashMap;
@@ -26,7 +26,7 @@ pub trait Device {
     fn execute(&self, event: DeviceEvent);
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum DeviceError {
     #[error("failed to map buffer")]
     Buffer(#[from] wgpu::BufferAsyncError),
@@ -40,7 +40,7 @@ pub enum DeviceError {
 pub struct ExecuteData(pub Mermaid);
 
 #[derive(Debug, Clone, Deref, DerefMut)]
-pub struct BackData(pub Box<[u8]>);
+pub struct BackData(pub Arc<[u8]>);
 
 #[derive(Debug, Clone)]
 pub enum DeviceEvent {

@@ -437,6 +437,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                 }
                 .await
                 .map(Buffer::into_inner)
+                .map(Arc::from)
                 .map(BackData);
                 _ = sender.send_async(data).await
             }

@@ -14,7 +14,7 @@ use crate::loom::{
 #[derive(Debug, Default, Display, Clone, Copy, PartialEq, Eq, Hash, Deref, DerefMut)]
 pub struct StashId(uid::Id<StashId>);
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Copy, Error)]
 pub enum AllocError {
     #[error("violation of write uniqueness rule: {0}")]
     WriteOnly(TensorId),

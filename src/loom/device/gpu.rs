@@ -35,7 +35,7 @@ pub struct Backend {
     /// Kernel launches issued by executing a tape of ops.
     kernels: Vec<Kernel>,
     /// Data uploads issued by executing a tape of ops.
-    uploads: Vec<Upload>,
+    inputs: Vec<HostData>,
 }
 
 impl super::Backend for Backend {
@@ -180,7 +180,7 @@ impl GpuBuilder {
         let allocator = RefCell::new(Allocator::default());
         let buffers = HashMap::default();
         let kernels = Vec::default();
-        let uploads = Vec::default();
+        let inputs = Vec::default();
 
         let (sender, receiver) = flume::unbounded();
         let backend = Backend {
@@ -190,7 +190,7 @@ impl GpuBuilder {
             queue,
             buffers,
             kernels,
-            uploads,
+            inputs,
         };
         platform::spawn(serve(backend, receiver));
 
@@ -231,7 +231,7 @@ pub struct Kernel {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Upload {
+pub struct HostData {
     pub id: TensorId,
     pub data: Arc<[u8]>,
 }
@@ -261,8 +261,15 @@ fn encode(device: &wgpu::Device, kernels: &[Kernel]) -> wgpu::CommandBuffer {
 
 async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
     let mut commit = HashSet::default();
-    let mut uploads = HashMap::<TensorId, Vec<_>>::default();
-    let mut commands = HashMap::<TensorId, Vec<_>>::default();
+    let mut commands = HashMap::<_, Vec<_>>::default();
+    let mut inputs = HashMap::<_, Vec<_>>::default();
+    let mut outputs = HashMap::<_, Output>::default();
+
+    #[derive(Debug, Clone)]
+    enum Output {
+        Ready(Result<BackData, DeviceError>),
+        Future(flume::Receiver<Result<BackData, DeviceError>>),
+    }
 
     'main: while let Ok(event) = receiver.recv_async().await {
         match event {
@@ -286,15 +293,15 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                     };
                 }
 
-                uploads
+                inputs
                     .entry(tape.id)
                     .or_default()
-                    .append(&mut backend.uploads);
+                    .append(&mut backend.inputs);
 
                 let command = {
-                    let (sender, receiver) = flume::bounded(1);
-                    commands.entry(tape.id).or_default().push(receiver.clone());
-                    sender
+                    let (tx, rx) = flume::bounded(1);
+                    commands.entry(tape.id).or_default().push(rx.clone());
+                    tx
                 };
 
                 let data = backend.allocator().mermaid(&tape);
@@ -308,6 +315,23 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                 });
             }
             DeviceEvent::Back { tape, sender } => {
+                // check if the tape already has been executed
+                if let Some(output) = outputs.get(&tape.id).cloned() {
+                    match output {
+                        Output::Ready(data) => _ = sender.send_async(data.clone()).await,
+                        Output::Future(output) => {
+                            let output = output
+                                .recv_async()
+                                .await
+                                .map_err(DeviceError::from)
+                                .flatten();
+                            outputs.insert(tape.id, Output::Ready(output.clone()));
+                            _ = sender.send_async(output).await;
+                        }
+                    }
+                    continue 'main;
+                }
+
                 let ops = tape
                     .ops
                     .iter()
@@ -327,12 +351,18 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                     };
                 }
 
-                let mut uploads = uploads.remove(&tape.id).unwrap_or_default();
-                uploads.append(&mut backend.uploads);
-                let uploads = uploads
+                let mut inputs = inputs.remove(&tape.id).unwrap_or_default();
+                inputs.append(&mut backend.inputs);
+                let inputs = inputs
                     .into_iter()
-                    .map(|upload| (backend.fetch(upload.id), upload.data))
+                    .map(|input| (backend.fetch(input.id), input.data))
                     .collect_vec();
+
+                let output = {
+                    let (tx, rx) = flume::bounded(1);
+                    outputs.insert(tape.id, Output::Future(rx));
+                    tx
+                };
 
                 let commands = commands.remove(&tape.id).unwrap_or_default();
                 let data = backend.fetch(tape.id);
@@ -341,7 +371,7 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                 let kernels = std::mem::take(&mut backend.kernels);
                 platform::dispatch(move || {
                     // 1. upload data into input buffers
-                    uploads
+                    inputs
                         .into_iter()
                         .for_each(|(buffer, data)| queue.write_buffer(&buffer, 0, &data));
 
@@ -370,9 +400,11 @@ async fn serve(mut backend: Backend, receiver: flume::Receiver<DeviceEvent>) {
                             let data = result
                                 .map(|_| back.get_mapped_range(..))
                                 .map(|data| data.to_vec().into_boxed_slice())
+                                .map(Arc::from)
                                 .map(BackData)
                                 .map_err(DeviceError::from);
-                            _ = sender.send(data)
+                            _ = sender.send(data.clone());
+                            _ = output.send(data);
                         });
 
                     // 4. poll and wait
@@ -437,14 +469,16 @@ mod tests {
 
         let tensor = Tensor::create(gpu.clone(), [C, T], data.clone())?;
         let mermaid = tensor.clone().mermaid();
-        let back = tensor.back();
+        let x = tensor.clone().back();
+        let y = tensor.back();
 
-        let (mermaid, back) = tokio::try_join!(mermaid, back)?;
+        let (mermaid, x, y) = tokio::try_join!(mermaid, x, y)?;
 
         println!("{mermaid}");
 
         let r#ref = data.into_iter().copied().collect::<Box<[_]>>();
-        assert_eq!(back, r#ref);
+        assert_eq!(x, r#ref);
+        assert_eq!(y, r#ref);
 
         Ok(())
     }
