@@ -47,14 +47,7 @@ impl Allocator {
     /// Allocates a new stash location if needed.
     pub fn retrieve(&mut self, id: TensorId) -> StashId {
         let root = self.redirect(id);
-        match self.stash.get(&root) {
-            Some(&id) => id,
-            None => {
-                let id = StashId(uid::Id::new());
-                self.stash.insert(root, id);
-                id
-            }
-        }
+        *self.stash.entry(root).or_default()
     }
 
     /// Checks if mutation uniqueness rules applies.
