@@ -28,13 +28,15 @@ pub trait IndexFn<Index> {
 pub trait Compose<F> {
     type Output;
 
-    /// Functional composition. `t.compose(f)` is `f ◦ t` in algebra.
+    /// Functional composition. `t.compose(f)` is `t ◦ f` in algebra.
     fn compose(&self, f: F) -> Self::Output;
 }
 
 #[derive(Debug, Display, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[display("{_0:?}")]
+#[deref(forward)]
+#[deref_mut(forward)]
 pub struct Shape(Box<[usize]>);
 
 impl From<usize> for Shape {
@@ -221,6 +223,8 @@ impl Shape {
 #[derive(Debug, Display, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[display("{_0:?}")]
+#[deref(forward)]
+#[deref_mut(forward)]
 pub struct Stride(Box<[usize]>);
 
 impl From<usize> for Stride {
@@ -281,6 +285,8 @@ impl Stride {
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into, Display)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[display("{_0:?}")]
+#[deref(forward)]
+#[deref_mut(forward)]
 pub struct Coord(Box<[usize]>);
 
 impl From<usize> for Coord {
@@ -356,6 +362,8 @@ impl Coord {
 #[derive(Debug, Display, Default, Clone, PartialEq, Eq, Hash, Deref, DerefMut, From, Into)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[display("<{}, {}>", self.shape(), self.stride())]
+#[deref(forward)]
+#[deref_mut(forward)]
 pub struct Layout(Box<[(usize, usize)]>);
 
 impl From<Vec<(usize, usize)>> for Layout {
@@ -450,6 +458,12 @@ impl Layout {
         let shape: Shape = shape.into();
         let stride: Stride = stride.into();
         Self(shape.iter().copied().zip_eq(stride.to_vec()).collect())
+    }
+
+    /// Creates a layout from a slice of tuples.
+    #[inline]
+    pub fn from_slice(slice: &[(usize, usize)]) -> Self {
+        Self(slice.to_vec().into())
     }
 
     /// Converts the layout into a fixed-size array of exact length.
@@ -622,21 +636,34 @@ impl Layout {
             if layout.len() <= len.max(1) {
                 break Self::from(layout);
             }
-            let coalesced = [&layout[..], &[(1, 0)]]
-                .concat()
-                .into_iter()
-                .tuples()
-                .map(|(x, y)| match (x, y) {
-                    ((1, _), y) => vec![y],
-                    (x, (1, _)) => vec![x],
-                    ((s0, d0), (s1, d1)) if d1 == s0 * d0 => vec![(s0 * s1, d0)],
-                    (x, y) => vec![x, y],
+
+            let coalesce = layout
+                .iter()
+                .tuple_windows()
+                .find_position(|&(&x, &y)| match (x, y) {
+                    ((1, _), _) | (_, (1, _)) => true,
+                    ((s0, d0), (_, d1)) if d1 == s0 * d0 => true,
+                    _ => false,
                 })
-                .concat();
-            if coalesced == layout {
+                .map(|(i, (&x, &y))| match (x, y) {
+                    ((1, _), y) => (i, y),
+                    (x, (1, _)) => (i, x),
+                    ((s0, d0), (s1, d1)) if d1 == s0 * d0 => (i, (s0 * s1, d0)),
+                    _ => unreachable!(),
+                });
+            let Some((index, value)) = coalesce else {
                 break Self::from(layout);
+            };
+
+            for i in 0..(layout.len() - 1) {
+                match i {
+                    i if i < index => continue,
+                    i if i == index => layout[i] = value,
+                    i if i > index => layout[i] = layout[i + 1],
+                    _ => unreachable!(),
+                }
             }
-            layout = coalesced;
+            layout.resize(layout.len() - 1, (1, 0));
         }
     }
 
@@ -691,7 +718,7 @@ impl Layout {
             })
             .try_collect()?;
 
-        Ok(Self::from_shape_stride(shape, product).coalesce_to(self.len()))
+        Ok(Self::from_shape_stride(shape, product))
     }
 
     /// Complement the layout to its full size, which is the least size that is admissible for completion.
@@ -721,11 +748,18 @@ impl Layout {
     #[inline]
     pub fn tiler(&self, tile: impl IntoIterator<Item = (usize, usize)>) -> Self {
         let (shape, stride): (Vec<_>, Vec<_>) = tile.into_iter().unzip();
-        let stride = stride
-            .into_iter()
-            .zip_eq(self.iter())
-            .map(|(d, &(_, r))| d * r)
-            .collect_vec();
+        let stride = Stride(
+            self.shape()
+                .iter()
+                .scan(1, |p, x| {
+                    let q = *p;
+                    *p *= x;
+                    Some(q)
+                })
+                .zip(stride.iter())
+                .map(|(q, d)| q * d)
+                .collect(),
+        );
         Self::from_shape_stride(shape, stride)
     }
 
@@ -735,7 +769,11 @@ impl Layout {
     #[inline]
     pub fn div(&self, tile: impl AsRef<Self>) -> Result<Self, LayoutError> {
         let tile = tile.as_ref();
-        tile.concat(tile.complement(self.size())?).compose(self)
+        let m = self.compose(tile)?.coalesce_to(tile.len());
+        let n = self
+            .compose(tile.complement(self.size())?)?
+            .coalesce_to(self.len());
+        Ok(m.concat(n))
     }
 
     /// Shortcut for calling [`Self::div`] on `self.tiler(tile)`.
@@ -754,7 +792,11 @@ impl Layout {
     pub fn prod(&self, tile: impl AsRef<Self>) -> Result<Self, LayoutError> {
         let tile = tile.as_ref();
         let size = self.size() * tile.full_size();
-        Ok(self.concat(tile.compose(self.complement(size)?)?))
+        let n = self
+            .complement(size)?
+            .compose(tile)?
+            .coalesce_to(tile.len());
+        Ok(self.concat(n))
     }
 
     /// Shortcut for calling [`Self::prod`] on `self.tiler(tile)`.
@@ -798,12 +840,11 @@ impl IndexFn<usize> for Layout {
     }
 }
 
-impl<T: AsRef<Layout>> Compose<T> for (usize, usize) {
+impl Compose<(usize, usize)> for Layout {
     type Output = Result<Layout, LayoutError>;
 
-    fn compose(&self, f: T) -> Self::Output {
-        let f = f.as_ref();
-        let &(n, r) = self;
+    fn compose(&self, (n, r): (usize, usize)) -> Self::Output {
+        let f = self;
         match n {
             0 | 1 => Ok(Layout::from_shape_stride(n, r)),
             n => {
@@ -834,15 +875,13 @@ impl<T: AsRef<Layout>> Compose<T> for (usize, usize) {
 impl<T: AsRef<Layout>> Compose<T> for Layout {
     type Output = Result<Self, LayoutError>;
 
-    /// Layout composition. `a.compose(b)` corresponds to `B ∘ A` in layout algebra.
+    /// Layout composition. `a.compose(b)` corresponds to `A ∘ B` in layout algebra.
     fn compose(&self, f: T) -> Self::Output {
-        if !self.check_disjoint() {
-            return Err(LayoutError::Disjoint(self.clone()));
+        let f = f.as_ref();
+        if !f.check_disjoint() {
+            return Err(LayoutError::Disjoint(f.clone()));
         }
-        let modes: Vec<_> = self
-            .iter()
-            .map(|&mode| mode.compose(f.as_ref()))
-            .try_collect()?;
+        let modes: Vec<_> = f.iter().map(|&mode| self.compose(mode)).try_collect()?;
         let layout = modes
             .into_iter()
             .fold(Layout::default(), |acc, x| acc.concat(x));
@@ -1141,66 +1180,66 @@ mod tests {
             let b = b.into_layout();
 
             let c = a.compose(&b)?;
-            println!("{b} ∘ {a} → {c}\n");
+            println!("{a} ∘ {b} → {c}\n");
             print_layout(&a);
             print_layout(&b);
             print_layout(&c);
             println!("------\n");
 
-            assert_eq!(c.size(), a.size());
-            assert!((0..a.size()).all(|index| b.value(a.value(index)) == c.value(index)));
+            assert_eq!(c.size(), b.size());
+            assert!((0..b.size()).all(|index| a.value(b.value(index)) == c.value(index)));
 
             Ok(())
         }
 
         check(([1], [0]), ([1], [0]))?;
-        check(([1], [0]), ([1], [1]))?;
         check(([1], [1]), ([1], [0]))?;
+        check(([1], [0]), ([1], [1]))?;
         check(([1], [1]), ([1], [1]))?;
 
-        check(([4], [1]), ([4], [2]))?;
-        check(([4], [1]), ([4], [0]))?;
+        check(([4], [2]), ([4], [1]))?;
         check(([4], [0]), ([4], [1]))?;
+        check(([4], [1]), ([4], [0]))?;
 
-        check(([2], [1]), ([4], [1]))?;
-        check(([2], [1]), ([4], [2]))?;
-        check(([2], [2]), ([4], [2]))?;
+        check(([4], [1]), ([2], [1]))?;
+        check(([4], [2]), ([2], [1]))?;
+        check(([4], [2]), ([2], [2]))?;
 
-        check([12], [4, 3])?;
         check([4, 3], [12])?;
-        check([4, 3], ([12], [2]))?;
-        check(([4, 3], [3, 1]), [12])?;
-        check(([4, 3], [3, 1]), ([12], [2]))?;
-        check(([2, 3], [2, 4]), [12])?;
-        check([4, 3], [4, 3])?;
-        check(([6], [2]), [4, 3])?;
-        check(([6, 2], [2, 1]), [4, 3])?;
-        check([4, 3], ([4, 3], [3, 1]))?;
+        check([12], [4, 3])?;
+        check(([12], [2]), [4, 3])?;
         check([12], ([4, 3], [3, 1]))?;
-        check(([6], [2]), ([4, 3], [3, 1]))?;
-        check(([6, 2], [2, 1]), ([4, 3], [3, 1]))?;
+        check(([12], [2]), ([4, 3], [3, 1]))?;
+        check([12], ([2, 3], [2, 4]))?;
+        check([4, 3], [4, 3])?;
+        check([4, 3], ([6], [2]))?;
+        check([4, 3], ([6, 2], [2, 1]))?;
+        check(([4, 3], [3, 1]), [4, 3])?;
+        check(([4, 3], [3, 1]), [12])?;
+        check(([4, 3], [3, 1]), ([6], [2]))?;
+        check(([4, 3], [3, 1]), ([6, 2], [2, 1]))?;
 
-        check(([2, 2, 2, 2, 2, 2], [1, 16, 4, 8, 2, 32]), [8, 8])?;
-        check(([2, 2, 2, 2, 2, 2], [1, 16, 4, 8, 2, 32]), ([8, 8], [8, 1]))?;
+        check([8, 8], ([2, 2, 2, 2, 2, 2], [1, 16, 4, 8, 2, 32]))?;
+        check(([8, 8], [8, 1]), ([2, 2, 2, 2, 2, 2], [1, 16, 4, 8, 2, 32]))?;
 
-        check(([4, 2], [2, 1]), ([4, 2], [1, 16]))?;
+        check(([4, 2], [1, 16]), ([4, 2], [2, 1]))?;
         check(([2, 2], [2, 1]), ([2, 2], [2, 1]))?;
 
-        check(([2, 2, 2], [2, 8, 1]), [4, 8, 2])?;
-        check(([2, 2, 2], [1, 8, 2]), ([4, 8, 2], [2, 8, 1]))?;
-        check(([4, 2, 2], [2, 8, 1]), ([4, 8, 2], [2, 8, 1]))?;
+        check([4, 8, 2], ([2, 2, 2], [2, 8, 1]))?;
+        check(([4, 8, 2], [2, 8, 1]), ([2, 2, 2], [1, 8, 2]))?;
+        check(([4, 8, 2], [2, 8, 1]), ([4, 2, 2], [2, 8, 1]))?;
 
         // last mode gets extended
-        check([24], ([4, 3], [3, 1]))?;
+        check(([4, 3], [3, 1]), [24])?;
 
         // last mode extension even without last mode divisibility
-        check([8], ([4, 3], [3, 1]))?;
+        check(([4, 3], [3, 1]), [8])?;
 
         // capping a layout with 1:0 extends in stride-0
-        check([24], ([4, 3, 1], [3, 1, 0]))?;
+        check(([4, 3, 1], [3, 1, 0]), [24])?;
 
         // disjoint requirement
-        assert!(check(([3, 2], [2, 3]), ([6, 2], [1, 7])).is_err());
+        assert!(check(([6, 2], [1, 7]), ([3, 2], [2, 3])).is_err());
 
         Ok(())
     }
